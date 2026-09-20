@@ -116,3 +116,24 @@ qs ipc call abdul891.camera setCtrl white_balance_automatic 0
 qs ipc call abdul891.camera setCtrl white_balance_temperature 4500
 qs ipc call abdul891.camera setCtrl logitech_brio_fov 78
 ```
+
+## Testing
+
+The plugin includes two test suites located in `tests/`:
+
+1. **Model & Parser Unit Tests** (offline):
+   Validates V4L2 and cameractrls CLI output parsing, control metadata definitions, command builders, dependency rules, and factory defaults without requiring camera hardware.
+   ```bash
+   node tests/model.test.js
+   # or from repository root:
+   node abdul891.camera/tests/model.test.js
+   ```
+
+2. **Live Hardware Verification Test** (requires `/dev/video0`):
+   Performs live round-trip mutation and restoration tests across all 18 supported camera controls against the physical Logitech MX Brio webcam. For each control, it records the current value, sets a different valid value, asserts hardware state change, restores original settings, and verifies factory reset behaviour. Skips cleanly if `/dev/video0` is absent.
+   ```bash
+   node tests/hardware.test.js
+   # or from repository root:
+   node abdul891.camera/tests/hardware.test.js
+   ```
+
