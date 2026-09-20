@@ -25,6 +25,7 @@ Item {
   property bool fovAvailable: false
   property bool refreshPending: false
   property int listGeneration: 0
+  property var pendingFov: null
   property var controls: ({})
   property var fovControl: ({})
   property string modelName: "Logitech MX Brio"
@@ -45,6 +46,9 @@ Item {
 
   function getCtrl(name) {
     if (name === "logitech_brio_fov") {
+      if (root.pendingFov !== null) {
+        return String(root.pendingFov)
+      }
       if (root.fovControl && root.fovControl.logitech_brio_fov !== undefined) {
         return String(root.fovControl.logitech_brio_fov)
       }
@@ -77,10 +81,15 @@ Item {
   }
 
   function setControl(name, value) {
-    root.listGeneration++
     var numVal = Number(value)
     if (name === "logitech_brio_fov") {
-      if (!root.fovAvailable) return
+      if (!root.fovAvailable) {
+        if (root.hasCameractrls && cameractrlsListProc.running) {
+          root.pendingFov = numVal
+        }
+        return
+      }
+      root.listGeneration++
       root.fovControl = { logitech_brio_fov: numVal }
       var fovCmd = (typeof Model !== "undefined" && typeof Model.buildFovSetCommand === "function")
         ? Model.buildFovSetCommand(root.device, numVal)
@@ -89,6 +98,7 @@ Item {
       return
     }
 
+    root.listGeneration++
     var updated = Object.assign({}, root.controls)
     if (!updated[name]) {
       updated[name] = { name: name, value: numVal }
@@ -111,6 +121,9 @@ Item {
     for (var i = 0; i < cmds.length; i++) {
       var cmd = cmds[i]
       if (cmd && cmd[0] === "cameractrls" && !root.fovAvailable) {
+        if (root.hasCameractrls && cameractrlsListProc.running) {
+          root.pendingFov = 65
+        }
         continue
       }
       queueCommand(cmd)
@@ -122,6 +135,8 @@ Item {
         if (k === "logitech_brio_fov") {
           if (root.fovAvailable) {
             root.fovControl = { logitech_brio_fov: defs[k] }
+          } else if (root.hasCameractrls && cameractrlsListProc.running) {
+            root.pendingFov = defs[k]
           }
         } else {
           if (!updated[k]) updated[k] = { name: k }
@@ -180,6 +195,7 @@ Item {
         root.readControls()
       } else {
         root.fovAvailable = false
+        root.pendingFov = null
       }
     }
   }
@@ -196,6 +212,7 @@ Item {
         }
       } else if (exitCode !== 0) {
         root.fovAvailable = false
+        root.pendingFov = null
       }
     }
   }
@@ -255,8 +272,14 @@ Item {
     onExited: function(exitCode) {
       if (exitCode !== 0 || !cameractrlsListProc.foundFov) {
         root.fovAvailable = false
+        root.pendingFov = null
       } else {
         root.fovAvailable = true
+        if (root.pendingFov !== null) {
+          var val = root.pendingFov
+          root.pendingFov = null
+          root.setControl("logitech_brio_fov", val)
+        }
       }
       if (root.refreshPending && !v4l2ListProc.running) {
         root.refreshPending = false
