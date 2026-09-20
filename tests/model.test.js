@@ -1,0 +1,477 @@
+const assert = require("node:assert/strict")
+const Model = require("../Model.js")
+
+// ---------------------------------------------------------------------------
+// Real hardware output fixtures from sup-1 probe (Logitech MX Brio on /dev/video0)
+// ---------------------------------------------------------------------------
+
+const V4L2_FIXTURE = `
+User Controls
+
+                     brightness 0x00980900 (int)    : min=0 max=255 step=1 default=128 value=128 flags=has-min-max
+                       contrast 0x00980901 (int)    : min=0 max=255 step=1 default=128 value=127 flags=has-min-max
+                     saturation 0x00980902 (int)    : min=0 max=255 step=1 default=128 value=137 flags=has-min-max
+        white_balance_automatic 0x0098090c (bool)   : default=1 value=1
+                           gain 0x00980913 (int)    : min=0 max=255 step=1 default=0 value=0 flags=has-min-max
+           power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=2 value=1 (50 Hz)
+				0: Disabled
+				1: 50 Hz
+				2: 60 Hz
+      white_balance_temperature 0x0098091a (int)    : min=2800 max=7500 step=1 default=5000 value=3997 flags=inactive, has-min-max
+                      sharpness 0x0098091b (int)    : min=0 max=255 step=1 default=128 value=128 flags=has-min-max
+         backlight_compensation 0x0098091c (int)    : min=0 max=1 step=1 default=1 value=1 flags=has-min-max
+
+Camera Controls
+
+                  auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=3 value=3 (Aperture Priority Mode)
+				1: Manual Mode
+				3: Aperture Priority Mode
+         exposure_time_absolute 0x009a0902 (int)    : min=3 max=2047 step=1 default=156 value=625 flags=inactive, has-min-max
+     exposure_dynamic_framerate 0x009a0903 (bool)   : default=0 value=0
+                   pan_absolute 0x009a0908 (int)    : min=-72000 max=72000 step=3600 default=0 value=-21600 flags=has-min-max
+                  tilt_absolute 0x009a0909 (int)    : min=-72000 max=72000 step=3600 default=0 value=50400 flags=has-min-max
+                 focus_absolute 0x009a090a (int)    : min=0 max=255 step=1 default=0 value=20 flags=inactive, has-min-max
+     focus_automatic_continuous 0x009a090c (bool)   : default=1 value=1
+                  zoom_absolute 0x009a090d (int)    : min=100 max=400 step=1 default=100 value=152 flags=has-min-max
+`
+
+const CAMERACTRLS_FIXTURE = `Basic / Crop
+ logitech_brio_fov = 65	( values: 65, 78, 90 )
+ zoom_absolute = 152	( default: 100 min: 100 max: 400 )
+ pan_absolute = -21600	( default: 0 min: -72000 max: 72000 step: 3600 )
+ tilt_absolute = 50400	( default: 0 min: -72000 max: 72000 step: 3600 )
+Basic / Focus
+ focus_automatic_continuous = 1	( default: 1 min: 0 max: 1 )
+ focus_absolute = 20	( default: 0 min: 0 max: 255 ) | inactive
+Exposure / Exposure
+ auto_exposure = aperture_priority_mode	( default: aperture_priority_mode values: manual_mode, aperture_priority_mode )
+ exposure_time_absolute = 625	( default: 156 min: 3 max: 2047 ) | inactive
+ exposure_dynamic_framerate = 0	( default: 0 min: 0 max: 1 )
+ gain = 0	( default: 0 min: 0 max: 255 )
+Exposure / Dynamic Range
+ backlight_compensation = 1	( default: 1 min: 0 max: 1 )
+Color / Color Preset
+ color_preset		( buttons: default, blossom, bright, film, forest, glaze, gray, vibrant, vivid )
+Color / Balance
+ white_balance_automatic = 1	( default: 1 min: 0 max: 1 )
+ white_balance_temperature = 3997	( default: 5000 min: 2800 max: 7500 ) | inactive
+Color / Color
+ brightness = 128	( default: 128 min: 0 max: 255 )
+ contrast = 127	( default: 128 min: 0 max: 255 )
+ saturation = 137	( default: 128 min: 0 max: 255 )
+ sharpness = 128	( default: 128 min: 0 max: 255 )
+Advanced / Power Line
+ power_line_frequency = 50_hz	( default: 60_hz values: disabled, 50_hz, 60_hz )
+Advanced / Cameractrlsd
+ systemd_cameractrlsd = False	( default: None min: None max: None )
+Capture / Capture
+ pixelformat = NV12	( values: YUYV, MJPG, NV12 )
+ resolution = 640x480	( values: 640x480, 640x360 )
+ fps = 30	( values: 30, 24, 20, 15, 10, 7.5, 5 )
+Capture / Info
+ card = MX Brio
+ driver = uvcvideo
+ path = /dev/video0
+ real_path = /dev/video0
+Settings / Save
+ preset		( buttons: load_1, load_2, load_3, load_4, save_1, save_2, save_3, save_4 )
+`
+
+// ---------------------------------------------------------------------------
+// 1. Parser verification: parseV4l2Ctrls on probe output
+// ---------------------------------------------------------------------------
+
+const v4l2 = Model.parseV4l2Ctrls(V4L2_FIXTURE)
+
+// Check every one of the 17 standard V4L2 controls:
+// brightness
+assert.equal(v4l2.brightness.name, "brightness")
+assert.equal(v4l2.brightness.type, "int")
+assert.equal(v4l2.brightness.value, 128)
+assert.equal(v4l2.brightness.min, 0)
+assert.equal(v4l2.brightness.max, 255)
+assert.equal(v4l2.brightness.step, 1)
+assert.equal(v4l2.brightness.defaultVal, 128)
+assert.equal(v4l2.brightness.inactive, false)
+
+// contrast
+assert.equal(v4l2.contrast.name, "contrast")
+assert.equal(v4l2.contrast.type, "int")
+assert.equal(v4l2.contrast.value, 127)
+assert.equal(v4l2.contrast.min, 0)
+assert.equal(v4l2.contrast.max, 255)
+assert.equal(v4l2.contrast.step, 1)
+assert.equal(v4l2.contrast.defaultVal, 128)
+assert.equal(v4l2.contrast.inactive, false)
+
+// saturation
+assert.equal(v4l2.saturation.name, "saturation")
+assert.equal(v4l2.saturation.type, "int")
+assert.equal(v4l2.saturation.value, 137)
+assert.equal(v4l2.saturation.min, 0)
+assert.equal(v4l2.saturation.max, 255)
+assert.equal(v4l2.saturation.step, 1)
+assert.equal(v4l2.saturation.defaultVal, 128)
+assert.equal(v4l2.saturation.inactive, false)
+
+// white_balance_automatic (bool line without min/max)
+assert.equal(v4l2.white_balance_automatic.name, "white_balance_automatic")
+assert.equal(v4l2.white_balance_automatic.type, "bool")
+assert.equal(v4l2.white_balance_automatic.value, 1)
+assert.equal(v4l2.white_balance_automatic.defaultVal, 1)
+assert.equal(v4l2.white_balance_automatic.min, undefined)
+assert.equal(v4l2.white_balance_automatic.max, undefined)
+assert.equal(v4l2.white_balance_automatic.step, undefined)
+assert.equal(v4l2.white_balance_automatic.inactive, false)
+
+// gain
+assert.equal(v4l2.gain.name, "gain")
+assert.equal(v4l2.gain.type, "int")
+assert.equal(v4l2.gain.value, 0)
+assert.equal(v4l2.gain.min, 0)
+assert.equal(v4l2.gain.max, 255)
+assert.equal(v4l2.gain.step, 1)
+assert.equal(v4l2.gain.defaultVal, 0)
+assert.equal(v4l2.gain.inactive, false)
+
+// power_line_frequency (menu with value suffix 'value=1 (50 Hz)' and menu items)
+assert.equal(v4l2.power_line_frequency.name, "power_line_frequency")
+assert.equal(v4l2.power_line_frequency.type, "menu")
+assert.equal(v4l2.power_line_frequency.value, 1)
+assert.equal(v4l2.power_line_frequency.min, 0)
+assert.equal(v4l2.power_line_frequency.max, 2)
+assert.equal(v4l2.power_line_frequency.defaultVal, 2)
+assert.equal(v4l2.power_line_frequency.inactive, false)
+assert.deepEqual(v4l2.power_line_frequency.menuItems, [
+  { value: 0, label: "Disabled" },
+  { value: 1, label: "50 Hz" },
+  { value: 2, label: "60 Hz" }
+])
+
+// white_balance_temperature (flags=inactive, has-min-max)
+assert.equal(v4l2.white_balance_temperature.name, "white_balance_temperature")
+assert.equal(v4l2.white_balance_temperature.type, "int")
+assert.equal(v4l2.white_balance_temperature.value, 3997)
+assert.equal(v4l2.white_balance_temperature.min, 2800)
+assert.equal(v4l2.white_balance_temperature.max, 7500)
+assert.equal(v4l2.white_balance_temperature.step, 1)
+assert.equal(v4l2.white_balance_temperature.defaultVal, 5000)
+assert.equal(v4l2.white_balance_temperature.inactive, true)
+
+// sharpness
+assert.equal(v4l2.sharpness.name, "sharpness")
+assert.equal(v4l2.sharpness.type, "int")
+assert.equal(v4l2.sharpness.value, 128)
+assert.equal(v4l2.sharpness.min, 0)
+assert.equal(v4l2.sharpness.max, 255)
+assert.equal(v4l2.sharpness.step, 1)
+assert.equal(v4l2.sharpness.defaultVal, 128)
+assert.equal(v4l2.sharpness.inactive, false)
+
+// backlight_compensation
+assert.equal(v4l2.backlight_compensation.name, "backlight_compensation")
+assert.equal(v4l2.backlight_compensation.type, "int")
+assert.equal(v4l2.backlight_compensation.value, 1)
+assert.equal(v4l2.backlight_compensation.min, 0)
+assert.equal(v4l2.backlight_compensation.max, 1)
+assert.equal(v4l2.backlight_compensation.step, 1)
+assert.equal(v4l2.backlight_compensation.defaultVal, 1)
+assert.equal(v4l2.backlight_compensation.inactive, false)
+
+// auto_exposure (menu with value suffix 'value=3 (Aperture Priority Mode)' and menu items)
+assert.equal(v4l2.auto_exposure.name, "auto_exposure")
+assert.equal(v4l2.auto_exposure.type, "menu")
+assert.equal(v4l2.auto_exposure.value, 3)
+assert.equal(v4l2.auto_exposure.min, 0)
+assert.equal(v4l2.auto_exposure.max, 3)
+assert.equal(v4l2.auto_exposure.defaultVal, 3)
+assert.equal(v4l2.auto_exposure.inactive, false)
+assert.deepEqual(v4l2.auto_exposure.menuItems, [
+  { value: 1, label: "Manual Mode" },
+  { value: 3, label: "Aperture Priority Mode" }
+])
+
+// exposure_time_absolute (flags=inactive)
+assert.equal(v4l2.exposure_time_absolute.name, "exposure_time_absolute")
+assert.equal(v4l2.exposure_time_absolute.type, "int")
+assert.equal(v4l2.exposure_time_absolute.value, 625)
+assert.equal(v4l2.exposure_time_absolute.min, 3)
+assert.equal(v4l2.exposure_time_absolute.max, 2047)
+assert.equal(v4l2.exposure_time_absolute.step, 1)
+assert.equal(v4l2.exposure_time_absolute.defaultVal, 156)
+assert.equal(v4l2.exposure_time_absolute.inactive, true)
+
+// exposure_dynamic_framerate (bool line)
+assert.equal(v4l2.exposure_dynamic_framerate.name, "exposure_dynamic_framerate")
+assert.equal(v4l2.exposure_dynamic_framerate.type, "bool")
+assert.equal(v4l2.exposure_dynamic_framerate.value, 0)
+assert.equal(v4l2.exposure_dynamic_framerate.defaultVal, 0)
+assert.equal(v4l2.exposure_dynamic_framerate.inactive, false)
+
+// pan_absolute (negative values: min=-72000, value=-21600)
+assert.equal(v4l2.pan_absolute.name, "pan_absolute")
+assert.equal(v4l2.pan_absolute.type, "int")
+assert.equal(v4l2.pan_absolute.value, -21600)
+assert.equal(v4l2.pan_absolute.min, -72000)
+assert.equal(v4l2.pan_absolute.max, 72000)
+assert.equal(v4l2.pan_absolute.step, 3600)
+assert.equal(v4l2.pan_absolute.defaultVal, 0)
+assert.equal(v4l2.pan_absolute.inactive, false)
+
+// tilt_absolute
+assert.equal(v4l2.tilt_absolute.name, "tilt_absolute")
+assert.equal(v4l2.tilt_absolute.type, "int")
+assert.equal(v4l2.tilt_absolute.value, 50400)
+assert.equal(v4l2.tilt_absolute.min, -72000)
+assert.equal(v4l2.tilt_absolute.max, 72000)
+assert.equal(v4l2.tilt_absolute.step, 3600)
+assert.equal(v4l2.tilt_absolute.defaultVal, 0)
+assert.equal(v4l2.tilt_absolute.inactive, false)
+
+// focus_absolute (flags=inactive)
+assert.equal(v4l2.focus_absolute.name, "focus_absolute")
+assert.equal(v4l2.focus_absolute.type, "int")
+assert.equal(v4l2.focus_absolute.value, 20)
+assert.equal(v4l2.focus_absolute.min, 0)
+assert.equal(v4l2.focus_absolute.max, 255)
+assert.equal(v4l2.focus_absolute.step, 1)
+assert.equal(v4l2.focus_absolute.defaultVal, 0)
+assert.equal(v4l2.focus_absolute.inactive, true)
+
+// focus_automatic_continuous (bool)
+assert.equal(v4l2.focus_automatic_continuous.name, "focus_automatic_continuous")
+assert.equal(v4l2.focus_automatic_continuous.type, "bool")
+assert.equal(v4l2.focus_automatic_continuous.value, 1)
+assert.equal(v4l2.focus_automatic_continuous.defaultVal, 1)
+assert.equal(v4l2.focus_automatic_continuous.inactive, false)
+
+// zoom_absolute
+assert.equal(v4l2.zoom_absolute.name, "zoom_absolute")
+assert.equal(v4l2.zoom_absolute.type, "int")
+assert.equal(v4l2.zoom_absolute.value, 152)
+assert.equal(v4l2.zoom_absolute.min, 100)
+assert.equal(v4l2.zoom_absolute.max, 400)
+assert.equal(v4l2.zoom_absolute.step, 1)
+assert.equal(v4l2.zoom_absolute.defaultVal, 100)
+assert.equal(v4l2.zoom_absolute.inactive, false)
+
+// ---------------------------------------------------------------------------
+// 2. Parser verification: parseCameractrls on probe output
+// ---------------------------------------------------------------------------
+
+const fovParsed = Model.parseCameractrls(CAMERACTRLS_FIXTURE)
+assert.equal(fovParsed.logitech_brio_fov, 65)
+
+// Edge cases for parsers
+assert.deepEqual(Model.parseCameractrls(""), {})
+assert.deepEqual(Model.parseCameractrls("no fov control in this output"), {})
+assert.deepEqual(Model.parseCameractrls(null), {})
+assert.deepEqual(Model.parseCameractrls(undefined), {})
+
+assert.deepEqual(Model.parseV4l2Ctrls(""), {})
+assert.deepEqual(Model.parseV4l2Ctrls(null), {})
+assert.deepEqual(Model.parseV4l2Ctrls(undefined), {})
+
+// ---------------------------------------------------------------------------
+// 3. CONTROLS metadata catalog check (all 18 controls defined)
+// ---------------------------------------------------------------------------
+
+const controlKeys = Object.keys(Model.CONTROLS)
+assert.equal(controlKeys.length, 18)
+
+// Check backend tag on vendor control
+assert.equal(Model.CONTROLS.logitech_brio_fov.backend, "cameractrls")
+assert.deepEqual(Model.CONTROLS.logitech_brio_fov.options, [65, 78, 90])
+
+// Ensure each control has required metadata fields
+for (const name of controlKeys) {
+  const ctrl = Model.CONTROLS[name]
+  assert.equal(ctrl.name, name)
+  assert.ok(ctrl.type, `missing type for ${name}`)
+  assert.ok(ctrl.defaultVal !== undefined, `missing defaultVal for ${name}`)
+  assert.ok(ctrl.category, `missing category for ${name}`)
+}
+
+// ---------------------------------------------------------------------------
+// 4. getDefaults: map of default values for all 18 controls
+// ---------------------------------------------------------------------------
+
+const defaults = Model.getDefaults()
+assert.equal(Object.keys(defaults).length, 18)
+assert.equal(defaults.brightness, 128)
+assert.equal(defaults.contrast, 128)
+assert.equal(defaults.saturation, 128)
+assert.equal(defaults.sharpness, 128)
+assert.equal(defaults.gain, 0)
+assert.equal(defaults.backlight_compensation, 1)
+assert.equal(defaults.power_line_frequency, 2)
+assert.equal(defaults.white_balance_automatic, 1)
+assert.equal(defaults.white_balance_temperature, 5000)
+assert.equal(defaults.auto_exposure, 3)
+assert.equal(defaults.exposure_time_absolute, 156)
+assert.equal(defaults.exposure_dynamic_framerate, 0)
+assert.equal(defaults.focus_automatic_continuous, 1)
+assert.equal(defaults.focus_absolute, 0)
+assert.equal(defaults.zoom_absolute, 100)
+assert.equal(defaults.pan_absolute, 0)
+assert.equal(defaults.tilt_absolute, 0)
+assert.equal(defaults.logitech_brio_fov, 65)
+
+// ---------------------------------------------------------------------------
+// 5. Command builders: build* command arrays
+// ---------------------------------------------------------------------------
+
+// buildV4l2ListCommand
+assert.deepEqual(Model.buildV4l2ListCommand(), [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video0",
+  "--list-ctrls-menus"
+])
+assert.deepEqual(Model.buildV4l2ListCommand("/dev/video2"), [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video2",
+  "--list-ctrls-menus"
+])
+
+// buildV4l2GetCommand
+assert.deepEqual(Model.buildV4l2GetCommand(null, "brightness"), [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video0",
+  "--get-ctrl",
+  "brightness"
+])
+assert.deepEqual(Model.buildV4l2GetCommand("/dev/video2", "contrast"), [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video2",
+  "--get-ctrl",
+  "contrast"
+])
+
+// buildV4l2SetCommand
+assert.deepEqual(Model.buildV4l2SetCommand(null, "brightness", 130), [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video0",
+  "--set-ctrl",
+  "brightness=130"
+])
+assert.deepEqual(Model.buildV4l2SetCommand("/dev/video2", "gain", 15), [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video2",
+  "--set-ctrl",
+  "gain=15"
+])
+
+// buildFovListCommand
+assert.deepEqual(Model.buildFovListCommand(), [
+  "cameractrls",
+  "-d",
+  "/dev/video0",
+  "-l"
+])
+assert.deepEqual(Model.buildFovListCommand("/dev/video2"), [
+  "cameractrls",
+  "-d",
+  "/dev/video2",
+  "-l"
+])
+
+// buildFovSetCommand
+assert.deepEqual(Model.buildFovSetCommand(null, 78), [
+  "cameractrls",
+  "-d",
+  "/dev/video0",
+  "-c",
+  "logitech_brio_fov=78"
+])
+assert.deepEqual(Model.buildFovSetCommand("/dev/video2", 90), [
+  "cameractrls",
+  "-d",
+  "/dev/video2",
+  "-c",
+  "logitech_brio_fov=90"
+])
+
+// ---------------------------------------------------------------------------
+// 6. buildResetCommands: resets all V4L2 controls + FOV reset
+// ---------------------------------------------------------------------------
+
+const resetCmds = Model.buildResetCommands()
+assert.equal(resetCmds.length, 2)
+
+// First command is v4l2-ctl covering all 17 standard controls
+assert.equal(resetCmds[0][0], "v4l2-ctl")
+assert.equal(resetCmds[0][1], "-d")
+assert.equal(resetCmds[0][2], "/dev/video0")
+assert.equal(resetCmds[0][3], "--set-ctrl")
+
+const v4l2PairsStr = resetCmds[0][4]
+for (const name of controlKeys) {
+  if (name !== "logitech_brio_fov") {
+    const expectedPair = `${name}=${Model.CONTROLS[name].defaultVal}`
+    assert.ok(
+      v4l2PairsStr.includes(expectedPair),
+      `Reset command missing pair for ${expectedPair}`
+    )
+  }
+}
+
+// Second command is cameractrls FOV reset to default 65
+assert.deepEqual(resetCmds[1], [
+  "cameractrls",
+  "-d",
+  "/dev/video0",
+  "-c",
+  "logitech_brio_fov=65"
+])
+
+// Device override parameter check
+const customResetCmds = Model.buildResetCommands("/dev/video1")
+assert.equal(customResetCmds[0][2], "/dev/video1")
+assert.equal(customResetCmds[1][2], "/dev/video1")
+
+// ---------------------------------------------------------------------------
+// 7. isControlActive dependency rules
+// ---------------------------------------------------------------------------
+
+// focus_absolute dependsOn focus_automatic_continuous (active when false / 0)
+assert.equal(Model.isControlActive("focus_absolute", { focus_automatic_continuous: 0 }), true)
+assert.equal(Model.isControlActive("focus_absolute", { focus_automatic_continuous: 1 }), false)
+assert.equal(Model.isControlActive("focus_absolute", { focus_automatic_continuous: false }), true)
+assert.equal(Model.isControlActive("focus_absolute", { focus_automatic_continuous: true }), false)
+assert.equal(Model.isControlActive("focus_absolute", { focus_automatic_continuous: { value: 0 } }), true)
+assert.equal(Model.isControlActive("focus_absolute", { focus_automatic_continuous: { value: 1 } }), false)
+// Default state (autofocus continuous = 1) means focus_absolute is inactive
+assert.equal(Model.isControlActive("focus_absolute", {}), false)
+
+// exposure_time_absolute dependsOn auto_exposure (active when 1, manual mode)
+assert.equal(Model.isControlActive("exposure_time_absolute", { auto_exposure: 1 }), true)
+assert.equal(Model.isControlActive("exposure_time_absolute", { auto_exposure: 3 }), false)
+assert.equal(Model.isControlActive("exposure_time_absolute", { auto_exposure: { value: 1 } }), true)
+assert.equal(Model.isControlActive("exposure_time_absolute", { auto_exposure: { value: 3 } }), false)
+// Default state (auto_exposure = 3, Aperture Priority) means exposure_time_absolute is inactive
+assert.equal(Model.isControlActive("exposure_time_absolute", {}), false)
+
+// white_balance_temperature dependsOn white_balance_automatic (active when false / 0)
+assert.equal(Model.isControlActive("white_balance_temperature", { white_balance_automatic: 0 }), true)
+assert.equal(Model.isControlActive("white_balance_temperature", { white_balance_automatic: 1 }), false)
+assert.equal(Model.isControlActive("white_balance_temperature", { white_balance_automatic: false }), true)
+assert.equal(Model.isControlActive("white_balance_temperature", { white_balance_automatic: true }), false)
+assert.equal(Model.isControlActive("white_balance_temperature", { white_balance_automatic: { value: 0 } }), true)
+assert.equal(Model.isControlActive("white_balance_temperature", { white_balance_automatic: { value: 1 } }), false)
+// Default state (white_balance_automatic = 1) means white_balance_temperature is inactive
+assert.equal(Model.isControlActive("white_balance_temperature", {}), false)
+
+// Controls without dependencies are always active
+assert.equal(Model.isControlActive("brightness", {}), true)
+assert.equal(Model.isControlActive("zoom_absolute", {}), true)
+assert.equal(Model.isControlActive("pan_absolute", {}), true)
+assert.equal(Model.isControlActive("logitech_brio_fov", {}), true)
+assert.equal(Model.isControlActive("unknown_control", {}), true)
+
+console.log("All Model.js tests passed successfully!")
