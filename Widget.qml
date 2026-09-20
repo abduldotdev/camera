@@ -22,6 +22,9 @@ Item {
   property string device: (typeof Model !== "undefined" && Model.DEFAULT_DEVICE) ? Model.DEFAULT_DEVICE : "/dev/video0"
   property bool devicePresent: false
   property bool hasCameractrls: false
+  property bool fovAvailable: false
+  property bool refreshPending: false
+  property int listGeneration: 0
   property var controls: ({})
   property var fovControl: ({})
   property string modelName: "Logitech MX Brio"
@@ -74,8 +77,10 @@ Item {
   }
 
   function setControl(name, value) {
+    root.listGeneration++
     var numVal = Number(value)
     if (name === "logitech_brio_fov") {
+      if (!root.fovAvailable) return
       root.fovControl = { logitech_brio_fov: numVal }
       var fovCmd = (typeof Model !== "undefined" && typeof Model.buildFovSetCommand === "function")
         ? Model.buildFovSetCommand(root.device, numVal)
@@ -99,18 +104,25 @@ Item {
   }
 
   function resetDefaults() {
+    root.listGeneration++
     var cmds = (typeof Model !== "undefined" && typeof Model.buildResetCommands === "function")
       ? Model.buildResetCommands(root.device)
       : []
     for (var i = 0; i < cmds.length; i++) {
-      queueCommand(cmds[i])
+      var cmd = cmds[i]
+      if (cmd && cmd[0] === "cameractrls" && !root.fovAvailable) {
+        continue
+      }
+      queueCommand(cmd)
     }
     if (typeof Model !== "undefined" && typeof Model.getDefaults === "function") {
       var defs = Model.getDefaults()
       var updated = Object.assign({}, root.controls)
       for (var k in defs) {
         if (k === "logitech_brio_fov") {
-          root.fovControl = { logitech_brio_fov: defs[k] }
+          if (root.fovAvailable) {
+            root.fovControl = { logitech_brio_fov: defs[k] }
+          }
         } else {
           if (!updated[k]) updated[k] = { name: k }
           updated[k] = Object.assign({}, updated[k], { value: defs[k] })
@@ -126,8 +138,20 @@ Item {
   }
 
   function readControls() {
-    if (!v4l2ListProc.running) v4l2ListProc.running = true
-    if (root.hasCameractrls && !cameractrlsListProc.running) {
+    if (!root.devicePresent) return
+    var v4l2Busy = v4l2ListProc.running
+    var fovBusy = root.fovAvailable && cameractrlsListProc.running
+    if (v4l2Busy || fovBusy) {
+      root.refreshPending = true
+      return
+    }
+
+    if (!v4l2ListProc.running) {
+      v4l2ListProc.queryGeneration = root.listGeneration
+      v4l2ListProc.running = true
+    }
+    if (root.fovAvailable && !cameractrlsListProc.running) {
+      cameractrlsListProc.queryGeneration = root.listGeneration
       cameractrlsListProc.running = true
     }
   }
@@ -149,7 +173,13 @@ Item {
     onExited: function(exitCode) {
       root.devicePresent = (exitCode === 0)
       if (root.devicePresent) {
+        if (root.hasCameractrls && !root.fovAvailable && !cameractrlsListProc.running) {
+          cameractrlsListProc.queryGeneration = root.listGeneration
+          cameractrlsListProc.running = true
+        }
         root.readControls()
+      } else {
+        root.fovAvailable = false
       }
     }
   }
@@ -159,17 +189,29 @@ Item {
     command: ["sh", "-c", "command -v cameractrls"]
     onExited: function(exitCode) {
       root.hasCameractrls = (exitCode === 0)
+      if (root.hasCameractrls && root.devicePresent) {
+        if (!cameractrlsListProc.running) {
+          cameractrlsListProc.queryGeneration = root.listGeneration
+          cameractrlsListProc.running = true
+        }
+      } else if (exitCode !== 0) {
+        root.fovAvailable = false
+      }
     }
   }
 
   Process {
     id: v4l2ListProc
+    property int queryGeneration: 0
     command: (typeof Model !== "undefined" && typeof Model.buildV4l2ListCommand === "function")
       ? Model.buildV4l2ListCommand(root.device)
       : ["v4l2-ctl", "-d", root.device, "--list-ctrls-menus"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (v4l2ListProc.queryGeneration !== root.listGeneration) {
+          return
+        }
         if (text && typeof Model !== "undefined" && typeof Model.parseV4l2Ctrls === "function") {
           var parsed = Model.parseV4l2Ctrls(text)
           if (parsed && Object.keys(parsed).length > 0) {
@@ -181,23 +223,44 @@ Item {
     }
     onExited: function(exitCode) {
       if (exitCode !== 0) root.devicePresent = false
+      if (root.refreshPending && !cameractrlsListProc.running) {
+        root.refreshPending = false
+        root.readControls()
+      }
     }
   }
 
   Process {
     id: cameractrlsListProc
+    property int queryGeneration: 0
+    property bool foundFov: false
     command: (typeof Model !== "undefined" && typeof Model.buildFovListCommand === "function")
       ? Model.buildFovListCommand(root.device)
       : ["cameractrls", "-d", root.device, "-l"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        cameractrlsListProc.foundFov = false
         if (text && typeof Model !== "undefined" && typeof Model.parseCameractrls === "function") {
           var parsed = Model.parseCameractrls(text)
           if (parsed && parsed.logitech_brio_fov !== undefined) {
-            root.fovControl = parsed
+            cameractrlsListProc.foundFov = true
+            if (cameractrlsListProc.queryGeneration === root.listGeneration) {
+              root.fovControl = parsed
+            }
           }
         }
+      }
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0 || !cameractrlsListProc.foundFov) {
+        root.fovAvailable = false
+      } else {
+        root.fovAvailable = true
+      }
+      if (root.refreshPending && !v4l2ListProc.running) {
+        root.refreshPending = false
+        root.readControls()
       }
     }
   }
@@ -264,6 +327,7 @@ Item {
     owner: root
     devicePresent: root.devicePresent
     hasCameractrls: root.hasCameractrls
+    fovAvailable: root.fovAvailable
     controls: root.controls
     fovControl: root.fovControl
     modelName: root.modelName

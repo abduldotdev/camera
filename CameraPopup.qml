@@ -14,6 +14,7 @@ PopupWindow {
   property bool open: false
   property bool devicePresent: false
   property bool hasCameractrls: false
+  property bool fovAvailable: false
   property var controls: ({})
   property var fovControl: ({})
   property string modelName: "Logitech MX Brio"
@@ -497,7 +498,7 @@ PopupWindow {
           }
 
           CameraSegmented {
-            visible: root.hasCameractrls
+            visible: root.fovAvailable
             label: "Field of View"
             options: [
               { value: "65", label: "65°" },
