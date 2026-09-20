@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "abdul891.camera",
+  "name": "Camera",
+  "version": "1.0.0",
+  "author": "abdul891",
+  "description": "Logitech webcam controller with Logi Tune-like settings",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Camera",
+    "description": "Logitech webcam controller with Logi Tune-like settings",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
