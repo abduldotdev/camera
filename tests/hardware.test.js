@@ -145,32 +145,21 @@ try {
     console.log(`${name}: ${beforeVal} -> ${afterVal} -> ${restoredVal}`)
   }
 
-  // Run Model.buildResetCommands() once and test defaults
+  // Run Model.buildResetCommands() once and assert every control equals its default afterwards
   console.log("\n=== Testing Factory Reset Commands ===")
   const resetCmds = Model.buildResetCommands(device)
-  let resetExecutionError = null
-
   for (const cmd of resetCmds) {
-    try {
-      runCmd(cmd)
-    } catch (err) {
-      resetExecutionError = err
-    }
+    runCmd(cmd)
   }
 
-  if (resetExecutionError) {
-    console.log(`[FINDING] Model.buildResetCommands() execution error: ${resetExecutionError.message.trim()}`)
-    console.log("[FINDING] Inactive controls (white_balance_temperature, exposure_time_absolute, focus_absolute) cannot be set in batched v4l2-ctl command while auto modes are active.")
-  } else {
-    const postResetV4l2 = getV4l2Controls()
-    const postResetFov = getFovControl()
-    const defaults = Model.getDefaults()
-    for (const name of Object.keys(Model.CONTROLS)) {
-      const val = name === "logitech_brio_fov" ? postResetFov : postResetV4l2[name]?.value
-      assert.equal(val, defaults[name], `Control ${name} did not equal default ${defaults[name]} after reset`)
-    }
-    console.log("Reset commands successfully set all controls to defaults.")
+  const postResetV4l2 = getV4l2Controls()
+  const postResetFov = getFovControl()
+  const defaults = Model.getDefaults()
+  for (const name of Object.keys(Model.CONTROLS)) {
+    const val = name === "logitech_brio_fov" ? postResetFov : postResetV4l2[name]?.value
+    assert.equal(val, defaults[name], `Control ${name} did not equal default ${defaults[name]} after reset (got ${val})`)
   }
+  console.log("Reset check: every control verified at factory default value")
 
 } finally {
   // Always restore original values even if an assertion fails

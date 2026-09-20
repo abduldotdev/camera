@@ -322,24 +322,55 @@ function getDefaults() {
 }
 
 // Builds CLI commands required to restore factory defaults for all controls.
-// Returns an array of command arrays: one v4l2-ctl command resetting all 17
-// standard controls in a single ioctl batch, and one cameractrls command for FOV.
+// Returns an ordered array of command arrays:
+// 1. Switch parent controls to manual so dependent controls become active.
+// 2. Set dependent controls (white_balance_temperature, exposure_time_absolute, focus_absolute) to defaults.
+// 3. Set all remaining standard V4L2 controls to defaults (including parent controls back to auto defaults).
+// 4. Reset cameractrls vendor FOV to default (65).
 function buildResetCommands(device) {
   var dev = device || DEFAULT_DEVICE
-  var v4l2Pairs = []
+
+  // 1. Switch three parent controls to manual
+  var parentManualCmd = [
+    "v4l2-ctl", "-d", dev, "--set-ctrl",
+    "white_balance_automatic=0,auto_exposure=1,focus_automatic_continuous=0"
+  ]
+
+  // 2. Set three dependent controls to their defaults while parents are manual
+  var dependentDefaults = [
+    "white_balance_temperature=" + CONTROLS.white_balance_temperature.defaultVal,
+    "exposure_time_absolute=" + CONTROLS.exposure_time_absolute.defaultVal,
+    "focus_absolute=" + CONTROLS.focus_absolute.defaultVal
+  ]
+  var dependentCmd = [
+    "v4l2-ctl", "-d", dev, "--set-ctrl", dependentDefaults.join(",")
+  ]
+
+  // 3. Set remaining standard controls to defaults, including parents back to auto
+  var dependentNames = {
+    white_balance_temperature: true,
+    exposure_time_absolute: true,
+    focus_absolute: true
+  }
+  var remainingPairs = []
   for (var name in CONTROLS) {
     if (CONTROLS.hasOwnProperty(name)) {
       var ctrl = CONTROLS[name]
-      if (ctrl.backend !== "cameractrls") {
-        v4l2Pairs.push(name + "=" + ctrl.defaultVal)
+      if (ctrl.backend !== "cameractrls" && !dependentNames[name]) {
+        remainingPairs.push(name + "=" + ctrl.defaultVal)
       }
     }
   }
-
-  return [
-    ["v4l2-ctl", "-d", dev, "--set-ctrl", v4l2Pairs.join(",")],
-    ["cameractrls", "-d", dev, "-c", "logitech_brio_fov=" + CONTROLS.logitech_brio_fov.defaultVal]
+  var remainingCmd = [
+    "v4l2-ctl", "-d", dev, "--set-ctrl", remainingPairs.join(",")
   ]
+
+  // 4. Reset cameractrls vendor FOV
+  var fovCmd = [
+    "cameractrls", "-d", dev, "-c", "logitech_brio_fov=" + CONTROLS.logitech_brio_fov.defaultVal
+  ]
+
+  return [parentManualCmd, dependentCmd, remainingCmd, fovCmd]
 }
 
 // Evaluates whether a control is currently active (editable) based on its

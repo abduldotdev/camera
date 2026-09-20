@@ -402,27 +402,53 @@ assert.deepEqual(Model.buildFovSetCommand("/dev/video2", 90), [
 // ---------------------------------------------------------------------------
 
 const resetCmds = Model.buildResetCommands()
-assert.equal(resetCmds.length, 2)
+assert.equal(resetCmds.length, 4)
 
-// First command is v4l2-ctl covering all 17 standard controls
-assert.equal(resetCmds[0][0], "v4l2-ctl")
-assert.equal(resetCmds[0][1], "-d")
-assert.equal(resetCmds[0][2], "/dev/video0")
-assert.equal(resetCmds[0][3], "--set-ctrl")
+// 1. First command switches three parents to manual
+assert.deepEqual(resetCmds[0], [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video0",
+  "--set-ctrl",
+  "white_balance_automatic=0,auto_exposure=1,focus_automatic_continuous=0"
+])
 
-const v4l2PairsStr = resetCmds[0][4]
+// 2. Second command sets dependent controls to defaults while parents are manual
+assert.deepEqual(resetCmds[1], [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video0",
+  "--set-ctrl",
+  "white_balance_temperature=5000,exposure_time_absolute=156,focus_absolute=0"
+])
+
+// 3. Third command sets remaining standard controls to defaults (including parents back to auto)
+assert.equal(resetCmds[2][0], "v4l2-ctl")
+assert.equal(resetCmds[2][1], "-d")
+assert.equal(resetCmds[2][2], "/dev/video0")
+assert.equal(resetCmds[2][3], "--set-ctrl")
+
+const remainingStr = resetCmds[2][4]
+const dependentNames = ["white_balance_temperature", "exposure_time_absolute", "focus_absolute"]
 for (const name of controlKeys) {
-  if (name !== "logitech_brio_fov") {
+  if (name !== "logitech_brio_fov" && !dependentNames.includes(name)) {
     const expectedPair = `${name}=${Model.CONTROLS[name].defaultVal}`
     assert.ok(
-      v4l2PairsStr.includes(expectedPair),
-      `Reset command missing pair for ${expectedPair}`
+      remainingStr.includes(expectedPair),
+      `Reset command 3 missing pair for ${expectedPair}`
     )
   }
 }
+// Dependent controls must NOT be in command 3
+for (const name of dependentNames) {
+  assert.ok(
+    !remainingStr.includes(`${name}=`),
+    `Reset command 3 should not include dependent control ${name}`
+  )
+}
 
-// Second command is cameractrls FOV reset to default 65
-assert.deepEqual(resetCmds[1], [
+// 4. Fourth command is cameractrls FOV reset to default 65
+assert.deepEqual(resetCmds[3], [
   "cameractrls",
   "-d",
   "/dev/video0",
@@ -434,6 +460,8 @@ assert.deepEqual(resetCmds[1], [
 const customResetCmds = Model.buildResetCommands("/dev/video1")
 assert.equal(customResetCmds[0][2], "/dev/video1")
 assert.equal(customResetCmds[1][2], "/dev/video1")
+assert.equal(customResetCmds[2][2], "/dev/video1")
+assert.equal(customResetCmds[3][2], "/dev/video1")
 
 // ---------------------------------------------------------------------------
 // 7. isControlActive dependency rules
