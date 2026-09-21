@@ -17,12 +17,16 @@ PopupWindow {
   property bool fovAvailable: false
   property var controls: ({})
   property var fovControl: ({})
+  property var captureMode: ({})
+  property var captureFormats: []
+  property bool captureBusy: false
   property string modelName: "Logitech MX Brio"
   property string devicePath: "/dev/video0"
   property bool isDragging: false
 
   signal refreshRequested()
   signal controlChanged(string name, var value)
+  signal captureModeChanged(int width, int height, real fps)
   signal resetRequested()
 
   readonly property var coordinatorKey: owner || root
@@ -593,6 +597,72 @@ PopupWindow {
 
           PanelSeparator {
             foreground: root.fg
+          }
+
+          // Capture
+          Column {
+            width: parent.width
+            spacing: 10
+            visible: root.captureFormats && root.captureFormats.length > 0
+
+            PanelSectionHeader {
+              text: "CAPTURE"
+              foreground: root.fg
+              fontFamily: root.fontFamily
+            }
+
+            CameraSegmented {
+              label: "Resolution"
+              options: (typeof Model !== "undefined" && typeof Model.resolutionOptions === "function")
+                ? Model.resolutionOptions(root.captureFormats, root.captureMode)
+                : []
+              value: (root.captureMode && root.captureMode.width !== undefined && root.captureMode.height !== undefined)
+                ? (root.captureMode.width + "x" + root.captureMode.height)
+                : ""
+              onChanged: function(val) {
+                var parts = val.split("x")
+                if (parts.length === 2 && typeof Model !== "undefined" && typeof Model.pickCaptureMode === "function") {
+                  var w = parseInt(parts[0], 10)
+                  var h = parseInt(parts[1], 10)
+                  var curFps = (root.captureMode && root.captureMode.fps !== undefined) ? root.captureMode.fps : 30
+                  var picked = Model.pickCaptureMode(root.captureFormats, root.captureMode, w, h, curFps)
+                  if (picked) {
+                    root.captureModeChanged(picked.width, picked.height, picked.fps)
+                  }
+                }
+              }
+            }
+
+            CameraSegmented {
+              label: "Frame rate"
+              options: (typeof Model !== "undefined" && typeof Model.fpsOptions === "function" && root.captureMode && root.captureMode.width !== undefined)
+                ? Model.fpsOptions(root.captureFormats, root.captureMode.width, root.captureMode.height, root.captureMode.pixelformat)
+                : []
+              value: (root.captureMode && root.captureMode.fps !== undefined) ? String(root.captureMode.fps) : ""
+              onChanged: function(val) {
+                if (typeof Model !== "undefined" && typeof Model.pickCaptureMode === "function" && root.captureMode && root.captureMode.width !== undefined) {
+                  var picked = Model.pickCaptureMode(root.captureFormats, root.captureMode, root.captureMode.width, root.captureMode.height, parseFloat(val))
+                  if (picked) {
+                    root.captureModeChanged(picked.width, picked.height, picked.fps)
+                  }
+                }
+              }
+            }
+
+            Text {
+              width: parent.width
+              wrapMode: Text.Wrap
+              font.family: root.fontFamily
+              font.pixelSize: 10
+              color: root.captureBusy ? root.urgent : root.safeMuted
+              text: root.captureBusy
+                ? "Camera is in use — close the app using it and try again."
+                : "Default mode for apps that don't choose their own. Can't change while the camera is in use."
+            }
+
+            PanelSeparator {
+              foreground: root.fg
+            }
           }
 
           // 2. Focus
