@@ -396,6 +396,8 @@ var PREFERRED_RESOLUTIONS = [
   [640, 480]
 ]
 
+var PREFERRED_FPS = [60, 30, 24, 15]
+
 var RESOLUTION_TAGS = {
   "3840x2160": "4K",
   "1920x1080": "1080p",
@@ -505,9 +507,34 @@ function resolutionOptions(formats, current, all) {
 }
 
 // Returns descending frame rate options for that exact size and format.
-// Each option provides { fps: number, value: string, label: string }
-function fpsOptions(formats, width, height, pixelformat) {
+// By default filters to PREFERRED_FPS plus current fps if offered.
+// Each option provides { fps: number, value: string, label: string } with bare number labels.
+function fpsOptions(formats, width, height, pixelformat, current, all) {
   if (!formats || !formats.length || !width || !height) return []
+
+  var includeAll = false
+  if (all === true) {
+    includeAll = true
+  } else if (current === true) {
+    includeAll = true
+    current = null
+  } else if (current && typeof current === "object" && current.all === true) {
+    includeAll = true
+  }
+
+  var curFps = null
+  if (current !== null && current !== undefined && current !== "") {
+    if (typeof current === "number") {
+      curFps = current
+    } else if (typeof current === "object" && current.fps !== undefined) {
+      curFps = parseFloat(current.fps)
+    } else {
+      var parsed = parseFloat(current)
+      if (!isNaN(parsed)) {
+        curFps = parsed
+      }
+    }
+  }
 
   var w = parseInt(width, 10)
   var h = parseInt(height, 10)
@@ -564,14 +591,24 @@ function fpsOptions(formats, width, height, pixelformat) {
     return b - a
   })
 
+  var preferredMap = {}
+  for (var p = 0; p < PREFERRED_FPS.length; p++) {
+    preferredMap[PREFERRED_FPS[p]] = true
+  }
+
   var options = []
   for (var n = 0; n < fpsCopy.length; n++) {
     var val = fpsCopy[n]
-    options.push({
-      fps: val,
-      value: String(val),
-      label: val + " fps"
-    })
+    var isPreferred = !!preferredMap[val]
+    var isCurrent = (curFps !== null && val === curFps)
+
+    if (includeAll || isPreferred || isCurrent) {
+      options.push({
+        fps: val,
+        value: String(val),
+        label: String(val)
+      })
+    }
   }
 
   return options
@@ -770,6 +807,7 @@ if (typeof module !== "undefined") {
     DEFAULT_DEVICE: DEFAULT_DEVICE,
     CONTROLS: CONTROLS,
     PREFERRED_RESOLUTIONS: PREFERRED_RESOLUTIONS,
+    PREFERRED_FPS: PREFERRED_FPS,
     RESOLUTION_TAGS: RESOLUTION_TAGS,
     parseV4l2Ctrls: parseV4l2Ctrls,
     parseCameractrls: parseCameractrls,
