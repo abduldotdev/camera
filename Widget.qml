@@ -358,7 +358,7 @@ Item {
     onRefreshRequested: root.refresh()
     onControlChanged: function(name, val) { root.setControl(name, val) }
     onResetRequested: root.resetDefaults()
-    onDraggingChanged: function(dragging) { root.isDragging = dragging }
+    onIsDraggingChanged: root.isDragging = popup.isDragging
   }
 
   Component.onCompleted: root.refresh()
