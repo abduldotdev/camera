@@ -290,6 +290,8 @@ PopupWindow {
     property int maximum: 72000
     signal stepRequested(int nextVal)
 
+    function snap(v) { var s = Math.max(1, cpt.step); return Math.max(cpt.minimum, Math.min(cpt.maximum, Math.round(v / s) * s)) }
+
     property int liveVal: value
     onValueChanged: if (!slider.dragging) liveVal = value
 
@@ -337,14 +339,14 @@ PopupWindow {
       value: cpt.value
 
       onMoved: function(v) {
-        cpt.liveVal = Math.round(v)
+        cpt.liveVal = snap(v)
         root.isDragging = true
         debounceTimer.restart()
       }
       onReleased: function(v) {
         debounceTimer.stop()
         root.isDragging = false
-        cpt.liveVal = Math.round(v)
+        cpt.liveVal = snap(v)
         cpt.stepRequested(cpt.liveVal)
       }
     }
