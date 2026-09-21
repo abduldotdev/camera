@@ -459,7 +459,7 @@ Item {
     }
     onRefreshRequested: root.refresh()
     onControlChanged: function(name, val) { root.setControl(name, val) }
-    onCaptureModeChanged: function(w, h, fps) { root.setCaptureMode(w, h, fps) }
+    onCaptureModeRequested: function(w, h, fps) { root.setCaptureMode(w, h, fps) }
     onResetRequested: root.resetDefaults()
     onIsDraggingChanged: root.isDragging = popup.isDragging
   }

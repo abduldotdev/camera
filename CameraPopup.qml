@@ -26,7 +26,7 @@ PopupWindow {
 
   signal refreshRequested()
   signal controlChanged(string name, var value)
-  signal captureModeChanged(int width, int height, real fps)
+  signal captureModeRequested(int width, int height, real fps)
   signal resetRequested()
 
   readonly property var coordinatorKey: owner || root
@@ -627,7 +627,7 @@ PopupWindow {
                   var curFps = (root.captureMode && root.captureMode.fps !== undefined) ? root.captureMode.fps : 30
                   var picked = Model.pickCaptureMode(root.captureFormats, root.captureMode, w, h, curFps)
                   if (picked) {
-                    root.captureModeChanged(picked.width, picked.height, picked.fps)
+                    root.captureModeRequested(picked.width, picked.height, picked.fps)
                   }
                 }
               }
@@ -643,7 +643,7 @@ PopupWindow {
                 if (typeof Model !== "undefined" && typeof Model.pickCaptureMode === "function" && root.captureMode && root.captureMode.width !== undefined) {
                   var picked = Model.pickCaptureMode(root.captureFormats, root.captureMode, root.captureMode.width, root.captureMode.height, parseFloat(val))
                   if (picked) {
-                    root.captureModeChanged(picked.width, picked.height, picked.fps)
+                    root.captureModeRequested(picked.width, picked.height, picked.fps)
                   }
                 }
               }
