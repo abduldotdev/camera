@@ -8,6 +8,7 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
 - **Fast & Stateless**: Communicates with hardware via non-blocking asynchronous `v4l2-ctl` and `cameractrls` calls. No background daemons and no open video streams.
 - **Categorized Settings Popup**:
   - **Framing & Optics**: Hardware Field of View (FOV) selection (65°, 78°, 90°), Digital Zoom (100%–400%), and Pan & Tilt sliders with step buttons.
+  - **Capture Mode**: Resolution (1080p, 720p, 480p) and frame rate selection (up to 60 fps) to configure Linux kernel driver capture defaults.
   - **Focus**: Continuous autofocus toggle and manual focus distance slider (active only when autofocus is off).
   - **Exposure**: Auto-exposure mode toggle (Aperture Priority vs Manual), manual exposure time slider (active only in manual mode), low-light compensation (dynamic framerate), and sensor gain slider.
   - **Color & Image**: Auto white balance toggle, color temperature slider (2800K–7500K, active only when AWB is off), brightness, contrast, saturation, and sharpness sliders.
@@ -40,6 +41,17 @@ From the root of the `omarchy-plugins` repository, run:
 ```
 
 `link.sh` scans for any directory containing `manifest.json` and creates a symlink under `~/.config/omarchy/plugins/abdul891.camera`. The shell will automatically load the bar widget.
+
+## Capture Mode (Resolution & Frame Rate)
+
+The plugin allows viewing the active capture mode and configuring the driver's default capture resolution and frame rate via `v4l2-ctl --set-fmt-video` and `--set-parm`.
+
+### Behaviour & Limitations
+
+- **Persistent Driver Default**: The configured capture mode persists in the `uvcvideo` kernel driver across process opens. It serves as the initial default for non-negotiating V4L2 tools and applications (e.g. `v4l2-ctl --stream-mmap`, `mpv av://v4l2:/dev/video0` without size arguments, or cameractrls preview).
+- **Exclusive Streaming Lock (`EBUSY`)**: Capture format and frame rate cannot be modified while any process is streaming video from `/dev/video0`. Attempting to set resolution or framerate while streaming returns `EBUSY` (`Device or resource busy`), and the popup indicates that the camera is currently in use.
+- **Negotiating Applications Override Mode**: Video conferencing applications, browsers, and streaming pipelines (such as Google Meet, Zoom, OBS Studio, ffmpeg, GStreamer, and PipeWire camera portal clients) negotiate their own resolution and framerate per stream upon opening the device. The plugin's default does not constrain negotiating apps; however, the popup actively displays whatever mode the streaming app negotiated.
+- **USB Link Speed & 4K Availability**: 4K resolution (3840×2160) requires a USB 3 link. Over a USB 2.0 link (480 Mbps), the camera hardware enumerates modes up to 1920×1080 @ 30 fps or 1600×896 @ 60 fps in MJPG.
 
 ## Controls Inventory
 
@@ -80,6 +92,7 @@ The plugin manages 18 distinct camera controls:
 | **Image Tuning (Brightness/Contrast/etc.)** | **Yes** | Fully supported via standard UVC controls `brightness`, `contrast`, `saturation`, `sharpness`. |
 | **Anti-flicker (50/60 Hz)** | **Yes** | Fully supported via standard UVC control `power_line_frequency`. |
 | **Factory Reset** | **Yes** | Fully supported by applying default hardware values. |
+| **Resolution & Frame Rate** | **Partial** | Driver default resolution and frame rate can be configured when idle; apps that negotiate per-stream (browsers, Zoom, PipeWire) override it, and settings cannot be changed while streaming (EBUSY). 4K requires a USB 3 link. |
 | **HDR (High Dynamic Range)** | **No** | **Impossible on Linux**. MX Brio HDR processing is controlled via closed-source vendor firmware commands not exposed to the Linux UVC driver or reverse-engineered in open-source tools. |
 | **RightSight AI Auto-Framing** | **No** | **Impossible on Linux**. RightSight is a proprietary software neural network running on the host machine inside the Logi Tune app on macOS/Windows; it is not camera hardware. |
 | **Show Mode (Desk Tracking)** | **No** | **Impossible on Linux**. Show Mode relies on proprietary host software running computer vision on the video feed to detect when the camera tilts down toward a desk. |
@@ -115,6 +128,14 @@ qs ipc call abdul891.camera setCtrl brightness 150
 qs ipc call abdul891.camera setCtrl white_balance_automatic 0
 qs ipc call abdul891.camera setCtrl white_balance_temperature 4500
 qs ipc call abdul891.camera setCtrl logitech_brio_fov 78
+
+# Query current capture mode (resolution, fps, pixelformat)
+qs ipc call abdul891.camera getCaptureMode
+# Output: 1280x720@30 MJPG
+
+# Set capture mode (resolution WxH, and optional fps)
+qs ipc call abdul891.camera setCaptureMode 1920x1080 30
+qs ipc call abdul891.camera setCaptureMode 1280x720 60
 ```
 
 ## Testing
