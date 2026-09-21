@@ -151,7 +151,7 @@ The plugin includes two test suites located in `tests/`:
    ```
 
 2. **Live Hardware Verification Test** (requires `/dev/video0`):
-   Performs live round-trip mutation and restoration tests across all 18 supported camera controls against the physical Logitech MX Brio webcam. For each control, it records the current value, sets a different valid value, asserts hardware state change, restores original settings, and verifies factory reset behaviour. Skips cleanly if `/dev/video0` is absent.
+   Performs live round-trip mutation and restoration tests across all 18 supported camera controls against the physical Logitech MX Brio webcam. For each control, it records the current value, sets a different valid value, asserts hardware state change, restores original settings, and verifies factory reset behaviour. It also performs a capture-mode round trip verifying video format enumeration, active mode querying, and resolution/framerate mutation and restoration (skipping cleanly if the device is busy). Skips cleanly if `/dev/video0` is absent.
    ```bash
    node tests/hardware.test.js
    # or from repository root:
