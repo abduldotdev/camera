@@ -40,7 +40,7 @@ PopupWindow {
   readonly property string fontFamily: bar ? bar.fontFamily : "monospace"
 
   property int margin: Style.gapsOut
-  readonly property int cardPadding: 14
+  property int cardPadding: Style.spacing.popupPadding
 
   implicitWidth: 380
   implicitHeight: 560
@@ -353,6 +353,7 @@ PopupWindow {
     radius: Style.cornerRadius
     color: root.bg
     borderSpec: root.borderSpec
+    padding: root.cardPadding
     opacity: root.open ? 1 : 0
 
     Behavior on opacity {
@@ -362,7 +363,10 @@ PopupWindow {
     Column {
       id: mainCol
       anchors.fill: parent
-      anchors.margins: root.cardPadding
+      anchors.topMargin: card.contentTopInset
+      anchors.rightMargin: card.contentRightInset
+      anchors.bottomMargin: card.contentBottomInset
+      anchors.leftMargin: card.contentLeftInset
       spacing: 8
 
       // Header
