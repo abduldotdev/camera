@@ -7,7 +7,7 @@ Item {
   id: root
 
   property var bar
-  property string moduleName: "abdul891.camera"
+  property string moduleName: "abduldotdev.camera"
   property var settings
 
   readonly property bool vertical: bar ? bar.vertical : false
@@ -224,7 +224,7 @@ Item {
   }
 
   IpcHandler {
-    target: "abdul891.camera"
+    target: "abduldotdev.camera"
 
     function open() { root.open() }
     function close() { root.close() }

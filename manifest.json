@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "abdul891.camera",
+  "id": "abduldotdev.camera",
   "name": "Camera",
   "version": "1.0.0",
-  "author": "abdul891",
+  "author": "abduldotdev",
   "license": "MIT",
   "description": "Logitech webcam controller with Logi Tune-like settings",
   "kinds": [

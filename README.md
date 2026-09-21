@@ -1,4 +1,4 @@
-# abdul891.camera
+# abduldotdev.camera
 
 Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like controls for Logitech webcams on Linux, specifically optimized for the Logitech MX Brio (`046d:0944`).
 
@@ -15,7 +15,7 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
   - **Utilities**: Anti-flicker power line frequency selection (Off, 50 Hz, 60 Hz) and backlight compensation toggle.
 - **Factory Reset**: One-click "Reset defaults" button restores all controls to factory defaults.
 - **Graceful Disconnected View**: Displays a clear "No camera connected" message and retry button when the camera is unplugged.
-- **Full IPC Support**: Control any setting via `qs ipc call abdul891.camera ...` from scripts, keybindings, or other shell tools.
+- **Full IPC Support**: Control any setting via `qs ipc call abduldotdev.camera ...` from scripts, keybindings, or other shell tools.
 
 ## Prerequisites
 
@@ -36,13 +36,11 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
 
 Before installing, ensure required dependencies are installed (see [Prerequisites](#prerequisites)).
 
-To install and enable the camera plugin (ID: `abdul891.camera`) directly using the Omarchy CLI:
+To install and enable the camera plugin (ID: `abduldotdev.camera`) directly using the Omarchy CLI:
 
 ```bash
-omarchy plugin add https://github.com/abdul891/abdul891.camera.git --enable
+omarchy plugin add https://github.com/abduldotdev/abduldotdev.camera.git --enable
 ```
-
-> **Note**: Update the repository URL above to your actual public repository URL once published to GitHub.
 
 ### Development (from the omarchy-plugins monorepo)
 
@@ -52,14 +50,14 @@ From the root of the `omarchy-plugins` repository, run:
 ./link.sh
 ```
 
-`link.sh` scans for any directory containing `manifest.json` and creates a symlink under `~/.config/omarchy/plugins/abdul891.camera`. The shell will automatically load the bar widget.
+`link.sh` scans for any directory containing `manifest.json` and creates a symlink under `~/.config/omarchy/plugins/abduldotdev.camera`. The shell will automatically load the bar widget.
 
 ## Uninstall / Remove
 
 To remove the plugin from Omarchy:
 
 ```bash
-omarchy plugin remove abdul891.camera
+omarchy plugin remove abduldotdev.camera
 ```
 
 Removal leaves nothing behind. The plugin is stateless and does not write any configuration files, caches, or state to disk.
@@ -123,41 +121,41 @@ The plugin manages 18 distinct camera controls:
 
 ## IPC Interface Contract
 
-The widget exposes an `IpcHandler` with target `"abdul891.camera"`. You can interact with it via `qs ipc call`:
+The widget exposes an `IpcHandler` with target `"abduldotdev.camera"`. You can interact with it via `qs ipc call`:
 
 ```bash
 # Open the camera settings popup
-qs ipc call abdul891.camera open
+qs ipc call abduldotdev.camera open
 
 # Close the camera settings popup
-qs ipc call abdul891.camera close
+qs ipc call abduldotdev.camera close
 
 # Toggle the camera settings popup
-qs ipc call abdul891.camera toggle
+qs ipc call abduldotdev.camera toggle
 
 # Reset all camera controls to factory defaults
-qs ipc call abdul891.camera resetDefaults
+qs ipc call abduldotdev.camera resetDefaults
 
 # Query the current value of a control
-qs ipc call abdul891.camera getCtrl brightness
+qs ipc call abduldotdev.camera getCtrl brightness
 # Output: 128
 
-qs ipc call abdul891.camera getCtrl logitech_brio_fov
+qs ipc call abduldotdev.camera getCtrl logitech_brio_fov
 # Output: 65
 
 # Set a control value
-qs ipc call abdul891.camera setCtrl brightness 150
-qs ipc call abdul891.camera setCtrl white_balance_automatic 0
-qs ipc call abdul891.camera setCtrl white_balance_temperature 4500
-qs ipc call abdul891.camera setCtrl logitech_brio_fov 78
+qs ipc call abduldotdev.camera setCtrl brightness 150
+qs ipc call abduldotdev.camera setCtrl white_balance_automatic 0
+qs ipc call abduldotdev.camera setCtrl white_balance_temperature 4500
+qs ipc call abduldotdev.camera setCtrl logitech_brio_fov 78
 
 # Query current capture mode (resolution, fps, pixelformat)
-qs ipc call abdul891.camera getCaptureMode
+qs ipc call abduldotdev.camera getCaptureMode
 # Output: 1280x720@30 MJPG
 
 # Set capture mode (resolution WxH, and optional fps)
-qs ipc call abdul891.camera setCaptureMode 1920x1080 30
-qs ipc call abdul891.camera setCaptureMode 1280x720 60
+qs ipc call abduldotdev.camera setCaptureMode 1920x1080 30
+qs ipc call abduldotdev.camera setCaptureMode 1280x720 60
 ```
 
 ## Testing
@@ -169,7 +167,7 @@ The plugin includes two test suites located in `tests/`:
    ```bash
    node tests/model.test.js
    # or from repository root:
-   node abdul891.camera/tests/model.test.js
+   node abduldotdev.camera/tests/model.test.js
    ```
 
 2. **Live Hardware Verification Test** (requires `/dev/video0`):
@@ -177,7 +175,7 @@ The plugin includes two test suites located in `tests/`:
    ```bash
    node tests/hardware.test.js
    # or from repository root:
-   node abdul891.camera/tests/hardware.test.js
+   node abduldotdev.camera/tests/hardware.test.js
    ```
 
 ## License
