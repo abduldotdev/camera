@@ -30,6 +30,7 @@ Item {
   property var fovControl: ({})
   property var captureMode: ({})
   property var captureFormats: []
+  property bool captureFormatsQueried: false
   property bool captureBusy: false
   property string modelName: "Logitech MX Brio"
   property var commandQueue: []
@@ -87,7 +88,6 @@ Item {
     var picked = Model.pickCaptureMode(root.captureFormats, root.captureMode, width, height, fps)
     if (!picked) return
     root.listGeneration++
-    root.captureBusy = false
     root.captureMode = picked
     var cmd = (typeof Model.buildV4l2SetCaptureModeCommand === "function")
       ? Model.buildV4l2SetCaptureModeCommand(root.device, picked)
@@ -96,14 +96,21 @@ Item {
   }
 
   function setCaptureModeFromIpc(resolution, fps) {
-    if (!resolution) return
+    if (!resolution || !/^\d+x\d+$/.test(resolution)) return
     var parts = resolution.split("x")
-    if (parts.length === 2) {
-      var w = parseInt(parts[0], 10)
-      var h = parseInt(parts[1], 10)
-      var f = (fps !== undefined && fps !== null && fps !== "") ? parseFloat(fps) : undefined
-      root.setCaptureMode(w, h, f)
+    var w = parseInt(parts[0], 10)
+    var h = parseInt(parts[1], 10)
+    if (w <= 0 || h <= 0) return
+
+    var f = undefined
+    if (fps !== undefined && fps !== null && fps !== "") {
+      var parsedFps = Number(fps)
+      if (!isFinite(parsedFps) || isNaN(parsedFps) || parsedFps <= 0) {
+        return
+      }
+      f = parsedFps
     }
+    root.setCaptureMode(w, h, f)
   }
 
   function queueCommand(cmd, kind) {
@@ -235,7 +242,8 @@ Item {
     onExited: function(exitCode) {
       root.devicePresent = (exitCode === 0)
       if (root.devicePresent) {
-        if (root.captureFormats.length === 0 && !v4l2FormatsProc.running) {
+        if (!root.captureFormatsQueried && !v4l2FormatsProc.running) {
+          root.captureFormatsQueried = true
           v4l2FormatsProc.running = true
         }
         if (root.hasCameractrls && !root.fovAvailable && !cameractrlsListProc.running) {
@@ -247,6 +255,7 @@ Item {
         root.fovAvailable = false
         root.pendingFov = null
         root.captureFormats = []
+        root.captureFormatsQueried = false
         root.captureMode = ({})
         root.captureBusy = false
       }
