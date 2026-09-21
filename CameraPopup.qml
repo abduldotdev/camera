@@ -634,9 +634,9 @@ PopupWindow {
             }
 
             CameraSegmented {
-              label: "Frame rate"
+              label: "Frame rate (fps)"
               options: (typeof Model !== "undefined" && typeof Model.fpsOptions === "function" && root.captureMode && root.captureMode.width !== undefined)
-                ? Model.fpsOptions(root.captureFormats, root.captureMode.width, root.captureMode.height, root.captureMode.pixelformat)
+                ? Model.fpsOptions(root.captureFormats, root.captureMode.width, root.captureMode.height, root.captureMode.pixelformat, root.captureMode.fps)
                 : []
               value: (root.captureMode && root.captureMode.fps !== undefined) ? String(root.captureMode.fps) : ""
               onChanged: function(val) {
