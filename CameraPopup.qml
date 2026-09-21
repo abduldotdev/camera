@@ -28,7 +28,8 @@ PopupWindow {
   readonly property var coordinatorKey: owner || root
   readonly property var anchorWindow: anchorItem ? anchorItem.QsWindow.window : null
   readonly property color bg: Color.popups.background
-  readonly property color borderColor: Color.popups.border
+  property color borderColor: Color.popups.border
+  property var borderSpec: Border.localOrSurfaceSpec("popups", "border", borderColor, Color.popups.border, Math.max(1, Style.space(2)))
   readonly property color accent: Color.accent
   readonly property color muted: Color.muted
   readonly property color urgent: Color.urgent
@@ -38,8 +39,8 @@ PopupWindow {
   readonly property color safeMuted: luminance(bg) > 0.6 ? "#5a5a5a" : Qt.rgba(fg.r, fg.g, fg.b, 0.72)
   readonly property string fontFamily: bar ? bar.fontFamily : "monospace"
 
-  readonly property int margin: 10
-  readonly property int cardPadding: 14
+  property int margin: Style.gapsOut
+  property int cardPadding: Style.spacing.popupPadding
 
   implicitWidth: 380
   implicitHeight: 560
@@ -74,31 +75,36 @@ PopupWindow {
       if (!root.anchorItem || !root.bar || !root.anchorWindow) return
 
       var target = root.anchorItem
+      var win = root.anchorWindow
       var w = root.implicitWidth
       var h = root.implicitHeight
-      var localX = target.width / 2 - w / 2
-      var localY = target.height + root.margin
+      var posX = 0
+      var posY = 0
 
       if (root.bar.position === "bottom") {
-        localY = -h - root.margin
+        var localX = target.width / 2 - w / 2
+        var point = win.contentItem.mapFromItem(target, localX, 0)
+        posX = Math.max(root.margin, Math.min(point.x, win.width - w - root.margin))
+        posY = -(h + root.margin)
       } else if (root.bar.position === "left") {
-        localX = target.width + root.margin
-        localY = target.height / 2 - h / 2
+        var localY = target.height / 2 - h / 2
+        var point = win.contentItem.mapFromItem(target, 0, localY)
+        posX = win.width + root.margin
+        posY = Math.max(root.margin, Math.min(point.y, win.height - h - root.margin))
       } else if (root.bar.position === "right") {
-        localX = -w - root.margin
-        localY = target.height / 2 - h / 2
-      }
-
-      var point = root.anchorWindow.contentItem.mapFromItem(target, localX, localY)
-
-      if (root.bar.position === "top" || root.bar.position === "bottom") {
-        point.x = Math.max(root.margin, Math.min(point.x, root.anchorWindow.width - w - root.margin))
+        var localY = target.height / 2 - h / 2
+        var point = win.contentItem.mapFromItem(target, 0, localY)
+        posX = -(w + root.margin)
+        posY = Math.max(root.margin, Math.min(point.y, win.height - h - root.margin))
       } else {
-        point.y = Math.max(root.margin, Math.min(point.y, root.anchorWindow.height - h - root.margin))
+        var localX = target.width / 2 - w / 2
+        var point = win.contentItem.mapFromItem(target, localX, 0)
+        posX = Math.max(root.margin, Math.min(point.x, win.width - w - root.margin))
+        posY = win.height + root.margin
       }
 
-      popupAnchor.rect.x = Math.round(point.x)
-      popupAnchor.rect.y = Math.round(point.y)
+      popupAnchor.rect.x = Math.round(posX)
+      popupAnchor.rect.y = Math.round(posY)
     }
   }
 
@@ -341,13 +347,13 @@ PopupWindow {
     }
   }
 
-  Rectangle {
+  BorderSurface {
     id: card
     anchors.fill: parent
-    radius: 0
+    radius: Style.cornerRadius
     color: root.bg
-    border.color: root.borderColor
-    border.width: 2
+    borderSpec: root.borderSpec
+    padding: root.cardPadding
     opacity: root.open ? 1 : 0
 
     Behavior on opacity {
@@ -357,7 +363,10 @@ PopupWindow {
     Column {
       id: mainCol
       anchors.fill: parent
-      anchors.margins: root.cardPadding
+      anchors.topMargin: card.contentTopInset
+      anchors.rightMargin: card.contentRightInset
+      anchors.bottomMargin: card.contentBottomInset
+      anchors.leftMargin: card.contentLeftInset
       spacing: 8
 
       // Header
