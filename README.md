@@ -7,7 +7,7 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
 - **Bar Widget Integration**: Compact camera icon in the Omarchy bar displaying connection status (dimmed when `/dev/video0` is disconnected).
 - **Fast & Stateless**: Communicates with hardware via non-blocking asynchronous `v4l2-ctl` and `cameractrls` calls. No background daemons and no open video streams.
 - **Categorized Settings Popup**:
-  - **Framing & Optics**: Hardware Field of View (FOV) selection (65°, 78°, 90°), Digital Zoom (100%–400%), and Pan & Tilt step adjustments.
+  - **Framing & Optics**: Hardware Field of View (FOV) selection (65°, 78°, 90°), Digital Zoom (100%–400%), and Pan & Tilt sliders with step buttons.
   - **Focus**: Continuous autofocus toggle and manual focus distance slider (active only when autofocus is off).
   - **Exposure**: Auto-exposure mode toggle (Aperture Priority vs Manual), manual exposure time slider (active only in manual mode), low-light compensation (dynamic framerate), and sensor gain slider.
   - **Color & Image**: Auto white balance toggle, color temperature slider (2800K–7500K, active only when AWB is off), brightness, contrast, saturation, and sharpness sliders.
