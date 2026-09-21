@@ -14,7 +14,7 @@ if (!fs.existsSync(device)) {
 function runCmd(cmd) {
   return cp.execFileSync(cmd[0], cmd.slice(1), {
     encoding: "utf8",
-    stdio: ["pipe", "pipe", "ignore"]
+    stdio: ["pipe", "pipe", "pipe"]
   })
 }
 
@@ -89,6 +89,9 @@ for (const name of Object.keys(Model.CONTROLS)) {
   }
 }
 
+// Snapshot original capture mode
+const initialCaptureMode = Model.parseV4l2CaptureMode(runCmd(Model.buildV4l2ListCommand(device)))
+
 try {
   console.log("=== Logitech MX Brio Hardware Control Verification (/dev/video0) ===")
 
@@ -161,6 +164,168 @@ try {
   }
   console.log("Reset check: every control verified at factory default value")
 
+  // === Testing Capture Mode Round Trip ===
+  console.log("\n=== Testing Capture Mode Round Trip ===")
+
+  // (a) run buildV4l2ListFormatsCommand and parse it;
+  //     assert at least one format with sizes and fps is enumerated and that parsed sizes/fps are numbers
+  const formatsOut = runCmd(Model.buildV4l2ListFormatsCommand(device))
+  const formats = Model.parseV4l2Formats(formatsOut)
+  assert.ok(Array.isArray(formats) && formats.length > 0, "Expected at least one enumerated video format")
+  let totalSizes = 0
+  let totalFps = 0
+  for (const fmt of formats) {
+    assert.equal(typeof fmt.pixelformat, "string", "Format pixelformat must be a string")
+    assert.ok(fmt.pixelformat.length > 0, "Format pixelformat must not be empty")
+    assert.ok(Array.isArray(fmt.sizes), `Format ${fmt.pixelformat} missing sizes array`)
+    for (const sz of fmt.sizes) {
+      totalSizes++
+      assert.equal(typeof sz.width, "number", `Size width must be a number (got ${typeof sz.width})`)
+      assert.equal(typeof sz.height, "number", `Size height must be a number (got ${typeof sz.height})`)
+      assert.ok(sz.width > 0 && sz.height > 0, "Width and height must be positive numbers")
+      assert.ok(Array.isArray(sz.fps), `FPS array missing for ${sz.width}x${sz.height}`)
+      for (const f of sz.fps) {
+        totalFps++
+        assert.equal(typeof f, "number", `FPS must be a number (got ${typeof f})`)
+        assert.ok(f > 0, "FPS must be a positive number")
+      }
+    }
+  }
+  assert.ok(totalSizes > 0, "At least one size must be enumerated across formats")
+  assert.ok(totalFps > 0, "At least one fps must be enumerated across formats")
+  console.log(`Formats enumerated: ${formats.length} format(s), ${totalSizes} size(s), ${totalFps} fps option(s)`)
+
+  // (b) run buildV4l2ListCommand and assert parseV4l2CaptureMode yields width/height/pixelformat/fps
+  //     AND parseV4l2Ctrls on the same combined output still yields all 18-1=17 standard V4L2 controls
+  const listCombinedOut = runCmd(Model.buildV4l2ListCommand(device))
+  const parsedCaptureMode = Model.parseV4l2CaptureMode(listCombinedOut)
+  assert.equal(typeof parsedCaptureMode.width, "number", "parseV4l2CaptureMode must yield width as number")
+  assert.equal(typeof parsedCaptureMode.height, "number", "parseV4l2CaptureMode must yield height as number")
+  assert.equal(typeof parsedCaptureMode.pixelformat, "string", "parseV4l2CaptureMode must yield pixelformat as string")
+  assert.ok(parsedCaptureMode.pixelformat.length > 0, "parseV4l2CaptureMode must yield non-empty pixelformat")
+  assert.equal(typeof parsedCaptureMode.fps, "number", "parseV4l2CaptureMode must yield fps as number")
+  assert.ok(parsedCaptureMode.fps > 0, "parseV4l2CaptureMode must yield positive fps")
+
+  const combinedCtrls = Model.parseV4l2Ctrls(listCombinedOut)
+  const standardCtrls = Object.keys(Model.CONTROLS).filter(name => Model.CONTROLS[name].backend !== "cameractrls")
+  assert.equal(standardCtrls.length, 17, `Expected 17 standard V4L2 controls, got ${standardCtrls.length}`)
+  for (const name of standardCtrls) {
+    assert.ok(combinedCtrls[name] !== undefined, `Control ${name} missing from parseV4l2Ctrls on combined list command output`)
+    assert.equal(typeof combinedCtrls[name].value, "number", `Control ${name} value must be a number`)
+  }
+  console.log(`Current capture mode: ${parsedCaptureMode.width}x${parsedCaptureMode.height}@${parsedCaptureMode.fps} ${parsedCaptureMode.pixelformat}`)
+  console.log("Combined list check: all 17 standard controls parsed without regression alongside capture mode")
+
+  // (c) record current capture mode, choose a different enumerated size/fps via pickCaptureMode
+  //     (e.g. the first preferred size that differs from current, at a different fps if available),
+  //     apply buildV4l2SetCaptureModeCommand; if the command fails and stderr/message contains 'busy'
+  //     (VIDIOC_S_FMT: failed: Device or resource busy — happens when any app is streaming),
+  //     log 'SKIP: capture mode busy' and skip (c)-(d) without failing;
+  //     otherwise re-read and assert the driver reports the chosen width/height/pixelformat/fps;
+  // (d) restore the original mode with buildV4l2SetCaptureModeCommand and assert it is back — this restore must run in a try/finally
+  const origCaptureMode = {
+    width: parsedCaptureMode.width,
+    height: parsedCaptureMode.height,
+    pixelformat: parsedCaptureMode.pixelformat,
+    fps: parsedCaptureMode.fps
+  }
+
+  let targetCaptureMode = null
+  for (const [w, h] of Model.PREFERRED_RESOLUTIONS) {
+    if (w !== origCaptureMode.width || h !== origCaptureMode.height) {
+      let altFps = undefined
+      for (const fmt of formats) {
+        for (const sz of (fmt.sizes || [])) {
+          if (sz.width === w && sz.height === h) {
+            const diffFps = (sz.fps || []).find(f => f !== origCaptureMode.fps)
+            if (diffFps !== undefined) {
+              altFps = diffFps
+              break
+            }
+          }
+        }
+        if (altFps !== undefined) break
+      }
+      const candidate = Model.pickCaptureMode(formats, origCaptureMode, w, h, altFps)
+      if (candidate) {
+        targetCaptureMode = candidate
+        break
+      }
+    }
+  }
+
+  if (!targetCaptureMode) {
+    for (const fmt of formats) {
+      for (const sz of (fmt.sizes || [])) {
+        if (sz.width !== origCaptureMode.width || sz.height !== origCaptureMode.height) {
+          const altFps = (sz.fps || []).find(f => f !== origCaptureMode.fps)
+          const candidate = Model.pickCaptureMode(formats, origCaptureMode, sz.width, sz.height, altFps)
+          if (candidate) {
+            targetCaptureMode = candidate
+            break
+          }
+        }
+      }
+      if (targetCaptureMode) break
+    }
+  }
+
+  assert.ok(targetCaptureMode !== null, "Failed to pick a different capture mode from enumerated formats")
+  assert.ok(
+    targetCaptureMode.width !== origCaptureMode.width ||
+    targetCaptureMode.height !== origCaptureMode.height ||
+    targetCaptureMode.fps !== origCaptureMode.fps ||
+    targetCaptureMode.pixelformat !== origCaptureMode.pixelformat,
+    "Target capture mode must differ from original capture mode"
+  )
+
+  let captureModeMutated = false
+  try {
+    try {
+      runCmd(Model.buildV4l2SetCaptureModeCommand(device, targetCaptureMode))
+      captureModeMutated = true
+    } catch (setErr) {
+      const errText = `${setErr.stdout || ""} ${setErr.stderr || ""} ${setErr.message || ""}`.toLowerCase()
+      if (errText.includes("busy")) {
+        console.log("SKIP: capture mode busy")
+      } else {
+        throw setErr
+      }
+    }
+
+    if (captureModeMutated) {
+      // Re-read and assert the driver reports the chosen width/height/pixelformat/fps
+      const postSetOut = runCmd(Model.buildV4l2ListCommand(device))
+      const postSetMode = Model.parseV4l2CaptureMode(postSetOut)
+      assert.equal(postSetMode.width, targetCaptureMode.width, `Capture width did not change to ${targetCaptureMode.width} (got ${postSetMode.width})`)
+      assert.equal(postSetMode.height, targetCaptureMode.height, `Capture height did not change to ${targetCaptureMode.height} (got ${postSetMode.height})`)
+      assert.equal(postSetMode.pixelformat, targetCaptureMode.pixelformat, `Capture pixelformat did not change to ${targetCaptureMode.pixelformat} (got ${postSetMode.pixelformat})`)
+      assert.equal(postSetMode.fps, targetCaptureMode.fps, `Capture fps did not change to ${targetCaptureMode.fps} (got ${postSetMode.fps})`)
+      console.log(`capture_mode: ${origCaptureMode.width}x${origCaptureMode.height}@${origCaptureMode.fps} ${origCaptureMode.pixelformat} -> ${postSetMode.width}x${postSetMode.height}@${postSetMode.fps} ${postSetMode.pixelformat}`)
+
+      // (d) restore the original mode with buildV4l2SetCaptureModeCommand and assert it is back
+      runCmd(Model.buildV4l2SetCaptureModeCommand(device, origCaptureMode))
+      captureModeMutated = false
+
+      const restoredOut = runCmd(Model.buildV4l2ListCommand(device))
+      const restoredMode = Model.parseV4l2CaptureMode(restoredOut)
+      assert.equal(restoredMode.width, origCaptureMode.width, `Capture width did not restore to ${origCaptureMode.width} (got ${restoredMode.width})`)
+      assert.equal(restoredMode.height, origCaptureMode.height, `Capture height did not restore to ${origCaptureMode.height} (got ${restoredMode.height})`)
+      assert.equal(restoredMode.pixelformat, origCaptureMode.pixelformat, `Capture pixelformat did not restore to ${origCaptureMode.pixelformat} (got ${restoredMode.pixelformat})`)
+      assert.equal(restoredMode.fps, origCaptureMode.fps, `Capture fps did not restore to ${origCaptureMode.fps} (got ${restoredMode.fps})`)
+      console.log(`capture_mode restored: ${restoredMode.width}x${restoredMode.height}@${restoredMode.fps} ${restoredMode.pixelformat}`)
+    }
+  } finally {
+    if (captureModeMutated) {
+      try {
+        runCmd(Model.buildV4l2SetCaptureModeCommand(device, origCaptureMode))
+        console.log(`Emergency restore: capture mode restored to ${origCaptureMode.width}x${origCaptureMode.height}@${origCaptureMode.fps} ${origCaptureMode.pixelformat}`)
+      } catch (e) {
+        console.error(`Error restoring capture mode in finally: ${e.message}`)
+      }
+    }
+  }
+
 } finally {
   // Always restore original values even if an assertion fails
   console.log("\nRestoring camera to original state...")
@@ -187,6 +352,21 @@ try {
       }
     } catch (restoreErr) {
       console.error(`Error restoring ${name}: ${restoreErr.message}`)
+    }
+  }
+  if (initialCaptureMode && initialCaptureMode.width) {
+    try {
+      const curMode = Model.parseV4l2CaptureMode(runCmd(Model.buildV4l2ListCommand(device)))
+      if (
+        curMode.width !== initialCaptureMode.width ||
+        curMode.height !== initialCaptureMode.height ||
+        curMode.pixelformat !== initialCaptureMode.pixelformat ||
+        curMode.fps !== initialCaptureMode.fps
+      ) {
+        runCmd(Model.buildV4l2SetCaptureModeCommand(device, initialCaptureMode))
+      }
+    } catch (restoreErr) {
+      console.error(`Error restoring capture mode: ${restoreErr.message}`)
     }
   }
   console.log("Camera state restoration complete.")

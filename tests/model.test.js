@@ -77,6 +77,101 @@ Settings / Save
  preset		( buttons: load_1, load_2, load_3, load_4, save_1, save_2, save_3, save_4 )
 `
 
+const V4L2_COMBINED_FIXTURE = `Format Video Capture:
+	Width/Height      : 1280/720
+	Pixel Format      : 'MJPG' (Motion-JPEG)
+	Field             : None
+	Bytes per Line    : 0
+	Size Image        : 529066
+	Colorspace        : sRGB
+	Transfer Function : Rec. 709
+	YCbCr/HSV Encoding: ITU-R 601
+	Quantization      : Default (maps to Full Range)
+	Flags             : 
+Streaming Parameters Video Capture:
+	Capabilities     : timeperframe
+	Frames per second: 30.000 (30/1)
+	Read buffers     : 0
+
+User Controls
+
+                     brightness 0x00980900 (int)    : min=0 max=255 step=1 default=128 value=128 flags=has-min-max
+                       contrast 0x00980901 (int)    : min=0 max=255 step=1 default=128 value=127 flags=has-min-max
+                     saturation 0x00980902 (int)    : min=0 max=255 step=1 default=128 value=137 flags=has-min-max
+        white_balance_automatic 0x0098090c (bool)   : default=1 value=1
+                           gain 0x00980913 (int)    : min=0 max=255 step=1 default=0 value=0 flags=has-min-max
+           power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=2 value=1 (50 Hz)
+				0: Disabled
+				1: 50 Hz
+				2: 60 Hz
+      white_balance_temperature 0x0098091a (int)    : min=2800 max=7500 step=1 default=5000 value=3997 flags=inactive, has-min-max
+                      sharpness 0x0098091b (int)    : min=0 max=255 step=1 default=128 value=128 flags=has-min-max
+         backlight_compensation 0x0098091c (int)    : min=0 max=1 step=1 default=1 value=1 flags=has-min-max
+
+Camera Controls
+
+                  auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=3 value=3 (Aperture Priority Mode)
+				1: Manual Mode
+				3: Aperture Priority Mode
+         exposure_time_absolute 0x009a0902 (int)    : min=3 max=2047 step=1 default=156 value=625 flags=inactive, has-min-max
+     exposure_dynamic_framerate 0x009a0903 (bool)   : default=0 value=0
+                   pan_absolute 0x009a0908 (int)    : min=-72000 max=72000 step=3600 default=0 value=-21600 flags=has-min-max
+                  tilt_absolute 0x009a0909 (int)    : min=-72000 max=72000 step=3600 default=0 value=50400 flags=has-min-max
+                 focus_absolute 0x009a090a (int)    : min=0 max=255 step=1 default=0 value=20 flags=inactive, has-min-max
+     focus_automatic_continuous 0x009a090c (bool)   : default=1 value=1
+                  zoom_absolute 0x009a090d (int)    : min=100 max=400 step=1 default=100 value=152 flags=has-min-max
+`
+
+const V4L2_FORMATS_FIXTURE = `ioctl: VIDIOC_ENUM_FMT
+	Type: Video Capture
+
+	[0]: 'YUYV' (YUYV 4:2:2)
+		Size: Discrete 640x480
+			Interval: Discrete 0.033s (30.000 fps)
+			Interval: Discrete 0.042s (24.000 fps)
+			Interval: Discrete 0.050s (20.000 fps)
+			Interval: Discrete 0.067s (15.000 fps)
+			Interval: Discrete 0.100s (10.000 fps)
+			Interval: Discrete 0.133s (7.500 fps)
+			Interval: Discrete 0.200s (5.000 fps)
+	[1]: 'MJPG' (Motion-JPEG, compressed)
+		Size: Discrete 1920x1080
+			Interval: Discrete 0.033s (30.000 fps)
+			Interval: Discrete 0.042s (24.000 fps)
+			Interval: Discrete 0.050s (20.000 fps)
+			Interval: Discrete 0.067s (15.000 fps)
+			Interval: Discrete 0.100s (10.000 fps)
+			Interval: Discrete 0.133s (7.500 fps)
+			Interval: Discrete 0.200s (5.000 fps)
+		Size: Discrete 1280x720
+			Interval: Discrete 0.017s (60.000 fps)
+			Interval: Discrete 0.033s (30.000 fps)
+			Interval: Discrete 0.042s (24.000 fps)
+			Interval: Discrete 0.050s (20.000 fps)
+			Interval: Discrete 0.067s (15.000 fps)
+			Interval: Discrete 0.100s (10.000 fps)
+			Interval: Discrete 0.133s (7.500 fps)
+			Interval: Discrete 0.200s (5.000 fps)
+		Size: Discrete 640x480
+			Interval: Discrete 0.017s (60.000 fps)
+			Interval: Discrete 0.033s (30.000 fps)
+			Interval: Discrete 0.042s (24.000 fps)
+			Interval: Discrete 0.050s (20.000 fps)
+			Interval: Discrete 0.067s (15.000 fps)
+			Interval: Discrete 0.100s (10.000 fps)
+			Interval: Discrete 0.133s (7.500 fps)
+			Interval: Discrete 0.200s (5.000 fps)
+	[2]: 'NV12' (Y/UV 4:2:0)
+		Size: Discrete 640x360
+			Interval: Discrete 0.033s (30.000 fps)
+			Interval: Discrete 0.042s (24.000 fps)
+			Interval: Discrete 0.050s (20.000 fps)
+			Interval: Discrete 0.067s (15.000 fps)
+			Interval: Discrete 0.100s (10.000 fps)
+			Interval: Discrete 0.133s (7.500 fps)
+			Interval: Discrete 0.200s (5.000 fps)
+`
+
 // ---------------------------------------------------------------------------
 // 1. Parser verification: parseV4l2Ctrls on probe output
 // ---------------------------------------------------------------------------
@@ -321,17 +416,21 @@ assert.equal(defaults.logitech_brio_fov, 65)
 // 5. Command builders: build* command arrays
 // ---------------------------------------------------------------------------
 
-// buildV4l2ListCommand
+// buildV4l2ListCommand (now includes --get-fmt-video and --get-parm before --list-ctrls-menus)
 assert.deepEqual(Model.buildV4l2ListCommand(), [
   "v4l2-ctl",
   "-d",
   "/dev/video0",
+  "--get-fmt-video",
+  "--get-parm",
   "--list-ctrls-menus"
 ])
 assert.deepEqual(Model.buildV4l2ListCommand("/dev/video2"), [
   "v4l2-ctl",
   "-d",
   "/dev/video2",
+  "--get-fmt-video",
+  "--get-parm",
   "--list-ctrls-menus"
 ])
 
@@ -501,5 +600,274 @@ assert.equal(Model.isControlActive("zoom_absolute", {}), true)
 assert.equal(Model.isControlActive("pan_absolute", {}), true)
 assert.equal(Model.isControlActive("logitech_brio_fov", {}), true)
 assert.equal(Model.isControlActive("unknown_control", {}), true)
+
+// ---------------------------------------------------------------------------
+// 8. Capture Mode: parseV4l2CaptureMode & parseV4l2Ctrls combined output
+// ---------------------------------------------------------------------------
+
+// parseV4l2CaptureMode parses width, height, pixelformat, and fps
+const captureMode = Model.parseV4l2CaptureMode(V4L2_COMBINED_FIXTURE)
+assert.equal(captureMode.width, 1280)
+assert.equal(captureMode.height, 720)
+assert.equal(captureMode.pixelformat, "MJPG")
+assert.equal(captureMode.fps, 30)
+
+// parseV4l2CaptureMode edge cases
+assert.deepEqual(Model.parseV4l2CaptureMode(""), {})
+assert.deepEqual(Model.parseV4l2CaptureMode(null), {})
+assert.deepEqual(Model.parseV4l2CaptureMode(undefined), {})
+assert.deepEqual(Model.parseV4l2CaptureMode("random text without capture blocks"), {})
+
+// Combined fixture must still parse all 17 V4L2 controls cleanly via parseV4l2Ctrls
+const combinedCtrls = Model.parseV4l2Ctrls(V4L2_COMBINED_FIXTURE)
+assert.equal(Object.keys(combinedCtrls).length, 17)
+assert.equal(combinedCtrls.brightness.value, 128)
+assert.equal(combinedCtrls.contrast.value, 127)
+assert.equal(combinedCtrls.auto_exposure.value, 3)
+assert.equal(combinedCtrls.zoom_absolute.value, 152)
+
+// ---------------------------------------------------------------------------
+// 9. Capture Formats: parseV4l2Formats on --list-formats-ext fixture
+// ---------------------------------------------------------------------------
+
+const formats = Model.parseV4l2Formats(V4L2_FORMATS_FIXTURE)
+assert.equal(formats.length, 3)
+
+// Format 0: YUYV
+assert.equal(formats[0].pixelformat, "YUYV")
+assert.equal(formats[0].description, "YUYV 4:2:2")
+assert.equal(formats[0].sizes.length, 1)
+assert.equal(formats[0].sizes[0].width, 640)
+assert.equal(formats[0].sizes[0].height, 480)
+assert.deepEqual(formats[0].sizes[0].fps, [30, 24, 20, 15, 10, 7.5, 5])
+// Verify 7.5 is preserved as floating point number
+assert.equal(typeof formats[0].sizes[0].fps[5], "number")
+assert.equal(formats[0].sizes[0].fps[5], 7.5)
+
+// Format 1: MJPG
+assert.equal(formats[1].pixelformat, "MJPG")
+assert.equal(formats[1].description, "Motion-JPEG, compressed")
+assert.equal(formats[1].sizes.length, 3)
+assert.equal(formats[1].sizes[0].width, 1920)
+assert.equal(formats[1].sizes[0].height, 1080)
+assert.deepEqual(formats[1].sizes[0].fps, [30, 24, 20, 15, 10, 7.5, 5])
+assert.equal(formats[1].sizes[1].width, 1280)
+assert.equal(formats[1].sizes[1].height, 720)
+assert.deepEqual(formats[1].sizes[1].fps, [60, 30, 24, 20, 15, 10, 7.5, 5])
+assert.equal(formats[1].sizes[2].width, 640)
+assert.equal(formats[1].sizes[2].height, 480)
+
+// Format 2: NV12
+assert.equal(formats[2].pixelformat, "NV12")
+assert.equal(formats[2].description, "Y/UV 4:2:0")
+assert.equal(formats[2].sizes.length, 1)
+assert.equal(formats[2].sizes[0].width, 640)
+assert.equal(formats[2].sizes[0].height, 360)
+
+// parseV4l2Formats edge cases
+assert.deepEqual(Model.parseV4l2Formats(""), [])
+assert.deepEqual(Model.parseV4l2Formats(null), [])
+assert.deepEqual(Model.parseV4l2Formats(undefined), [])
+
+// ---------------------------------------------------------------------------
+// 10. Capture Command Builders
+// ---------------------------------------------------------------------------
+
+// buildV4l2ListFormatsCommand
+assert.deepEqual(Model.buildV4l2ListFormatsCommand(), [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video0",
+  "--list-formats-ext"
+])
+assert.deepEqual(Model.buildV4l2ListFormatsCommand("/dev/video1"), [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video1",
+  "--list-formats-ext"
+])
+
+// buildV4l2SetCaptureModeCommand
+assert.deepEqual(
+  Model.buildV4l2SetCaptureModeCommand(null, {
+    width: 1920,
+    height: 1080,
+    pixelformat: "MJPG",
+    fps: 30
+  }),
+  [
+    "v4l2-ctl",
+    "-d",
+    "/dev/video0",
+    "--set-fmt-video=width=1920,height=1080,pixelformat=MJPG",
+    "--set-parm=30"
+  ]
+)
+assert.deepEqual(
+  Model.buildV4l2SetCaptureModeCommand("/dev/video2", {
+    width: 1280,
+    height: 720,
+    pixelformat: "MJPG",
+    fps: 60
+  }),
+  [
+    "v4l2-ctl",
+    "-d",
+    "/dev/video2",
+    "--set-fmt-video=width=1280,height=720,pixelformat=MJPG",
+    "--set-parm=60"
+  ]
+)
+
+// ---------------------------------------------------------------------------
+// 11. resolutionOptions
+// ---------------------------------------------------------------------------
+
+// Preferred resolutions filtering (3840x2160 absent from fixture, so only 1080p, 720p, 480p)
+const resOpts = Model.resolutionOptions(formats)
+assert.equal(resOpts.length, 3)
+assert.deepEqual(resOpts.map(function(r) { return r.value }), ["1920x1080", "1280x720", "640x480"])
+assert.deepEqual(resOpts.map(function(r) { return r.label }), ["1080p", "720p", "480p"])
+
+// MJPG preference: 640x480 is present in both YUYV and MJPG, must select MJPG
+assert.equal(resOpts[2].pixelformat, "MJPG")
+
+// Currently-set size included even if not in PREFERRED_RESOLUTIONS
+const resWithCurrent = Model.resolutionOptions(formats, { width: 640, height: 360 })
+assert.equal(resWithCurrent.length, 4)
+assert.deepEqual(
+  resWithCurrent.map(function(r) { return r.value }),
+  ["1920x1080", "1280x720", "640x480", "640x360"]
+)
+assert.equal(resWithCurrent[3].value, "640x360")
+assert.equal(resWithCurrent[3].label, "640×360")
+assert.equal(resWithCurrent[3].pixelformat, "NV12")
+
+// All resolutions returned when all: true
+const resAll = Model.resolutionOptions(formats, null, true)
+assert.equal(resAll.length, 4)
+assert.deepEqual(
+  resAll.map(function(r) { return r.value }),
+  ["1920x1080", "1280x720", "640x480", "640x360"]
+)
+
+// Edge case: empty formats
+assert.deepEqual(Model.resolutionOptions([]), [])
+assert.deepEqual(Model.resolutionOptions(null), [])
+
+// ---------------------------------------------------------------------------
+// 12. fpsOptions
+// ---------------------------------------------------------------------------
+
+assert.deepEqual(Model.PREFERRED_FPS, [60, 30, 24, 15])
+
+// Preferred-only filtering (1080p MJPG offers 30, 24, 20, 15, 10, 7.5, 5; returns 30, 24, 15)
+const fps1080 = Model.fpsOptions(formats, 1920, 1080, "MJPG")
+assert.equal(fps1080.length, 3)
+assert.deepEqual(
+  fps1080.map(function(o) { return o.fps }),
+  [30, 24, 15]
+)
+assert.deepEqual(
+  fps1080.map(function(o) { return o.value }),
+  ["30", "24", "15"]
+)
+assert.deepEqual(
+  fps1080.map(function(o) { return o.label }),
+  ["30", "24", "15"]
+)
+
+// Current fps always included even when not in PREFERRED_FPS
+const fpsWith75 = Model.fpsOptions(formats, 1920, 1080, "MJPG", 7.5)
+assert.equal(fpsWith75.length, 4)
+assert.deepEqual(
+  fpsWith75.map(function(o) { return o.fps }),
+  [30, 24, 15, 7.5]
+)
+assert.deepEqual(
+  fpsWith75.map(function(o) { return o.label }),
+  ["30", "24", "15", "7.5"]
+)
+
+const fpsWith20 = Model.fpsOptions(formats, 1920, 1080, "MJPG", 20)
+assert.equal(fpsWith20.length, 4)
+assert.deepEqual(
+  fpsWith20.map(function(o) { return o.fps }),
+  [30, 24, 20, 15]
+)
+
+// All frame rates returned when all: true
+const fpsAll = Model.fpsOptions(formats, 1920, 1080, "MJPG", null, true)
+assert.equal(fpsAll.length, 7)
+assert.deepEqual(
+  fpsAll.map(function(o) { return o.fps }),
+  [30, 24, 20, 15, 10, 7.5, 5]
+)
+assert.deepEqual(
+  fpsAll.map(function(o) { return o.label }),
+  ["30", "24", "20", "15", "10", "7.5", "5"]
+)
+
+// 720p preferred fps (offers 60, 30, 24, 20, 15, 10, 7.5, 5; returns 60, 30, 24, 15)
+const fps720 = Model.fpsOptions(formats, 1280, 720, "MJPG")
+assert.equal(fps720.length, 4)
+assert.deepEqual(
+  fps720.map(function(o) { return o.fps }),
+  [60, 30, 24, 15]
+)
+assert.equal(fps720[0].fps, 60)
+assert.equal(fps720[0].label, "60")
+
+// Unknown size / missing format
+assert.deepEqual(Model.fpsOptions(formats, 9999, 9999, "MJPG"), [])
+assert.deepEqual(Model.fpsOptions([], 1920, 1080), [])
+
+// ---------------------------------------------------------------------------
+// 13. pickCaptureMode
+// ---------------------------------------------------------------------------
+
+// Exact match
+const picked1 = Model.pickCaptureMode(formats, null, 1920, 1080, 30)
+assert.deepEqual(picked1, {
+  width: 1920,
+  height: 1080,
+  pixelformat: "MJPG",
+  fps: 30
+})
+
+// Nearest-fps fallback: 60 requested at 1920x1080 (where max is 30) clamps to 30
+const pickedNearest = Model.pickCaptureMode(formats, null, 1920, 1080, 60)
+assert.equal(pickedNearest.fps, 30)
+
+// Nearest-fps fallback: 22 requested clamps to 20 or 24
+const picked22 = Model.pickCaptureMode(formats, null, 1920, 1080, 22)
+assert.ok(picked22.fps === 20 || picked22.fps === 24)
+
+// Format fallback: current format is YUYV, which does NOT offer 1920x1080 -> fall back to MJPG
+const pickedFallbackPf = Model.pickCaptureMode(formats, { pixelformat: "YUYV" }, 1920, 1080, 30)
+assert.equal(pickedFallbackPf.pixelformat, "MJPG")
+
+// Format retention: current format is YUYV, which DOES offer 640x480 -> retain YUYV
+const pickedRetainPf = Model.pickCaptureMode(formats, { pixelformat: "YUYV" }, 640, 480, 30)
+assert.equal(pickedRetainPf.pixelformat, "YUYV")
+
+// Format fallback to first offering when neither current nor MJPG offers it
+const pickedNV12 = Model.pickCaptureMode(formats, null, 640, 360, 30)
+assert.equal(pickedNV12.pixelformat, "NV12")
+
+// Unknown size returns null
+assert.equal(Model.pickCaptureMode(formats, null, 9999, 8888, 30), null)
+assert.equal(Model.pickCaptureMode([], null, 1920, 1080, 30), null)
+
+// ---------------------------------------------------------------------------
+// 14. Verification: CONTROLS, getDefaults, buildResetCommands untouched
+// ---------------------------------------------------------------------------
+
+assert.equal(Object.keys(Model.CONTROLS).length, 18)
+assert.equal(Object.keys(Model.getDefaults()).length, 18)
+assert.equal(Model.buildResetCommands().length, 4)
+assert.equal(Model.CONTROLS.capture_mode, undefined)
+assert.equal(Model.CONTROLS.resolution, undefined)
+assert.equal(Model.CONTROLS.pixelformat, undefined)
 
 console.log("All Model.js tests passed successfully!")

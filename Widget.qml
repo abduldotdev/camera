@@ -28,11 +28,18 @@ Item {
   property var pendingFov: null
   property var controls: ({})
   property var fovControl: ({})
+  property var captureMode: ({})
+  property var captureFormats: []
+  property bool captureFormatsQueried: false
+  property bool captureBusy: false
   property string modelName: "Logitech MX Brio"
   property var commandQueue: []
   property bool isDragging: false
 
-  function close() { popup.open = false }
+  function close() {
+    popup.open = false
+    root.captureBusy = false
+  }
   function open() {
     popup.open = true
     refresh()
@@ -67,16 +74,61 @@ Item {
     root.setControl(name, value)
   }
 
-  function queueCommand(cmd) {
+  function getCaptureMode() {
+    if (root.captureMode && root.captureMode.width !== undefined && root.captureMode.height !== undefined) {
+      var fpsStr = root.captureMode.fps !== undefined ? ("@" + root.captureMode.fps) : ""
+      var pfStr = root.captureMode.pixelformat ? (" " + root.captureMode.pixelformat) : ""
+      return root.captureMode.width + "x" + root.captureMode.height + fpsStr + pfStr
+    }
+    return ""
+  }
+
+  function setCaptureMode(width, height, fps) {
+    if (typeof Model === "undefined" || typeof Model.pickCaptureMode !== "function") return
+    var picked = Model.pickCaptureMode(root.captureFormats, root.captureMode, width, height, fps)
+    if (!picked) return
+    root.listGeneration++
+    root.captureMode = picked
+    var cmd = (typeof Model.buildV4l2SetCaptureModeCommand === "function")
+      ? Model.buildV4l2SetCaptureModeCommand(root.device, picked)
+      : ["v4l2-ctl", "-d", root.device, "--set-fmt-video=width=" + picked.width + ",height=" + picked.height + ",pixelformat=" + picked.pixelformat, "--set-parm=" + picked.fps]
+    queueCommand(cmd, "capture")
+  }
+
+  function setCaptureModeFromIpc(resolution, fps) {
+    if (!resolution || !/^\d+x\d+$/.test(resolution)) return
+    var parts = resolution.split("x")
+    var w = parseInt(parts[0], 10)
+    var h = parseInt(parts[1], 10)
+    if (w <= 0 || h <= 0) return
+
+    var f = undefined
+    if (fps !== undefined && fps !== null && fps !== "") {
+      var parsedFps = Number(fps)
+      if (!isFinite(parsedFps) || isNaN(parsedFps) || parsedFps <= 0) {
+        return
+      }
+      f = parsedFps
+    }
+    root.setCaptureMode(w, h, f)
+  }
+
+  function queueCommand(cmd, kind) {
     if (!cmd || !cmd.length) return
-    commandQueue.push(cmd)
+    commandQueue.push({ cmd: cmd, kind: kind || "control" })
     pumpCommandQueue()
   }
 
   function pumpCommandQueue() {
     if (cmdExecProc.running || commandQueue.length === 0) return
-    var nextCmd = commandQueue.shift()
-    cmdExecProc.command = nextCmd
+    var item = commandQueue.shift()
+    if (Array.isArray(item)) {
+      cmdExecProc.currentKind = "control"
+      cmdExecProc.command = item
+    } else {
+      cmdExecProc.currentKind = item.kind || "control"
+      cmdExecProc.command = item.cmd
+    }
     cmdExecProc.running = true
   }
 
@@ -180,6 +232,8 @@ Item {
     function resetDefaults() { root.resetDefaults() }
     function getCtrl(name: string): string { return root.getCtrl(name) }
     function setCtrl(name: string, value: string) { root.setCtrl(name, value) }
+    function getCaptureMode(): string { return root.getCaptureMode() }
+    function setCaptureMode(resolution: string, fps: string) { root.setCaptureModeFromIpc(resolution, fps) }
   }
 
   Process {
@@ -188,6 +242,10 @@ Item {
     onExited: function(exitCode) {
       root.devicePresent = (exitCode === 0)
       if (root.devicePresent) {
+        if (!root.captureFormatsQueried && !v4l2FormatsProc.running) {
+          root.captureFormatsQueried = true
+          v4l2FormatsProc.running = true
+        }
         if (root.hasCameractrls && !root.fovAvailable && !cameractrlsListProc.running) {
           cameractrlsListProc.queryGeneration = root.listGeneration
           cameractrlsListProc.running = true
@@ -196,6 +254,10 @@ Item {
       } else {
         root.fovAvailable = false
         root.pendingFov = null
+        root.captureFormats = []
+        root.captureFormatsQueried = false
+        root.captureMode = ({})
+        root.captureBusy = false
       }
     }
   }
@@ -218,11 +280,29 @@ Item {
   }
 
   Process {
+    id: v4l2FormatsProc
+    command: (typeof Model !== "undefined" && typeof Model.buildV4l2ListFormatsCommand === "function")
+      ? Model.buildV4l2ListFormatsCommand(root.device)
+      : ["v4l2-ctl", "-d", root.device, "--list-formats-ext"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (text && typeof Model !== "undefined" && typeof Model.parseV4l2Formats === "function") {
+          var fmts = Model.parseV4l2Formats(text)
+          if (fmts && fmts.length > 0) {
+            root.captureFormats = fmts
+          }
+        }
+      }
+    }
+  }
+
+  Process {
     id: v4l2ListProc
     property int queryGeneration: 0
     command: (typeof Model !== "undefined" && typeof Model.buildV4l2ListCommand === "function")
       ? Model.buildV4l2ListCommand(root.device)
-      : ["v4l2-ctl", "-d", root.device, "--list-ctrls-menus"]
+      : ["v4l2-ctl", "-d", root.device, "--get-fmt-video", "--get-parm", "--list-ctrls-menus"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -234,6 +314,12 @@ Item {
           if (parsed && Object.keys(parsed).length > 0) {
             root.controls = parsed
             root.devicePresent = true
+          }
+        }
+        if (text && typeof Model !== "undefined" && typeof Model.parseV4l2CaptureMode === "function") {
+          var parsedMode = Model.parseV4l2CaptureMode(text)
+          if (parsedMode && parsedMode.width !== undefined) {
+            root.captureMode = parsedMode
           }
         }
       }
@@ -290,7 +376,15 @@ Item {
 
   Process {
     id: cmdExecProc
+    property string currentKind: ""
     onExited: function(exitCode) {
+      if (cmdExecProc.currentKind === "capture") {
+        if (exitCode !== 0) {
+          root.captureBusy = true
+        } else {
+          root.captureBusy = false
+        }
+      }
       if (root.commandQueue.length > 0) {
         root.pumpCommandQueue()
       } else {
@@ -353,10 +447,19 @@ Item {
     fovAvailable: root.fovAvailable
     controls: root.controls
     fovControl: root.fovControl
+    captureMode: root.captureMode
+    captureFormats: root.captureFormats
+    captureBusy: root.captureBusy
     modelName: root.modelName
     devicePath: root.device
+    onOpenChanged: {
+      if (!popup.open) {
+        root.captureBusy = false
+      }
+    }
     onRefreshRequested: root.refresh()
     onControlChanged: function(name, val) { root.setControl(name, val) }
+    onCaptureModeChanged: function(w, h, fps) { root.setCaptureMode(w, h, fps) }
     onResetRequested: root.resetDefaults()
     onIsDraggingChanged: root.isDragging = popup.isDragging
   }

@@ -285,9 +285,409 @@ function parseCameractrls(rawText) {
   return result
 }
 
-// Command builder: query all standard V4L2 controls and menus
+// Parse stdout from `v4l2-ctl -d <dev> --list-formats-ext`.
+// Returns array of format objects:
+// [{ pixelformat: "MJPG", description: "...", sizes: [{ width: 1920, height: 1080, fps: [30, 24, ...] }] }]
+function parseV4l2Formats(rawText) {
+  if (!rawText || typeof rawText !== "string") return []
+
+  var formats = []
+  var lines = rawText.split(/\r?\n/)
+  var currentFormat = null
+  var currentSize = null
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+
+    var fmtMatch = line.match(/^\s*\[\d+\]:\s*'([^']+)'\s*\(([^)]+)\)/)
+    if (fmtMatch) {
+      currentFormat = {
+        pixelformat: fmtMatch[1],
+        description: fmtMatch[2].trim(),
+        sizes: []
+      }
+      formats.push(currentFormat)
+      currentSize = null
+      continue
+    }
+
+    var sizeMatch = line.match(/^\s*Size:\s*Discrete\s+(\d+)x(\d+)/)
+    if (sizeMatch && currentFormat) {
+      currentSize = {
+        width: parseInt(sizeMatch[1], 10),
+        height: parseInt(sizeMatch[2], 10),
+        fps: []
+      }
+      currentFormat.sizes.push(currentSize)
+      continue
+    }
+
+    var fpsMatch = line.match(/^\s*Interval:\s*Discrete\s+[\d.]+s\s+\(([\d.]+)\s*fps\)/)
+    if (fpsMatch && currentSize) {
+      var fpsVal = parseFloat(fpsMatch[1])
+      currentSize.fps.push(fpsVal)
+      continue
+    }
+  }
+
+  return formats
+}
+
+// Parse stdout from `v4l2-ctl -d <dev> --get-fmt-video --get-parm`.
+// Extracts active capture format and framerate into:
+// { width: 1280, height: 720, pixelformat: "MJPG", fps: 30 }
+function parseV4l2CaptureMode(rawText) {
+  if (!rawText || typeof rawText !== "string") return {}
+
+  var mode = {}
+
+  var whMatch = rawText.match(/Width\/Height\s*:\s*(\d+)\/(\d+)/)
+  if (whMatch) {
+    mode.width = parseInt(whMatch[1], 10)
+    mode.height = parseInt(whMatch[2], 10)
+  }
+
+  var pfMatch = rawText.match(/Pixel Format\s*:\s*'([^']+)'/)
+  if (pfMatch) {
+    mode.pixelformat = pfMatch[1]
+  }
+
+  var fpsMatch = rawText.match(/Frames per second\s*:\s*([\d.]+)/)
+  if (fpsMatch) {
+    mode.fps = parseFloat(fpsMatch[1])
+  }
+
+  return mode
+}
+
+// Command builder: query active format, streaming parms, and controls in one refresh
 function buildV4l2ListCommand(device) {
-  return ["v4l2-ctl", "-d", device || DEFAULT_DEVICE, "--list-ctrls-menus"]
+  return [
+    "v4l2-ctl",
+    "-d",
+    device || DEFAULT_DEVICE,
+    "--get-fmt-video",
+    "--get-parm",
+    "--list-ctrls-menus"
+  ]
+}
+
+// Command builder: list all supported video formats and frame intervals
+function buildV4l2ListFormatsCommand(device) {
+  return ["v4l2-ctl", "-d", device || DEFAULT_DEVICE, "--list-formats-ext"]
+}
+
+// Command builder: set active video capture resolution, pixel format, and frame rate
+function buildV4l2SetCaptureModeCommand(device, mode) {
+  var dev = device || DEFAULT_DEVICE
+  return [
+    "v4l2-ctl",
+    "-d",
+    dev,
+    "--set-fmt-video=width=" + mode.width + ",height=" + mode.height + ",pixelformat=" + mode.pixelformat,
+    "--set-parm=" + mode.fps
+  ]
+}
+
+var PREFERRED_RESOLUTIONS = [
+  [3840, 2160],
+  [1920, 1080],
+  [1280, 720],
+  [640, 480]
+]
+
+var PREFERRED_FPS = [60, 30, 24, 15]
+
+var RESOLUTION_TAGS = {
+  "3840x2160": "4K",
+  "1920x1080": "1080p",
+  "1280x720": "720p",
+  "640x480": "480p"
+}
+
+// Returns curated, de-duplicated list of { width, height, pixelformat, value, label }
+// offered in the UI. For each distinct size, prefers MJPG when offered, else first format.
+// Sorted largest first. By default limits to PREFERRED_RESOLUTIONS plus current size.
+function resolutionOptions(formats, current, all) {
+  if (!formats || !formats.length) return []
+
+  var includeAll = false
+  if (all === true) {
+    includeAll = true
+  } else if (current === true) {
+    includeAll = true
+    current = null
+  } else if (current && typeof current === "object" && current.all === true) {
+    includeAll = true
+  }
+
+  var curW = null
+  var curH = null
+  if (current) {
+    if (typeof current === "string") {
+      var parts = current.split("x")
+      if (parts.length === 2) {
+        curW = parseInt(parts[0], 10)
+        curH = parseInt(parts[1], 10)
+      }
+    } else if (typeof current === "object") {
+      if (current.width !== undefined && current.height !== undefined) {
+        curW = parseInt(current.width, 10)
+        curH = parseInt(current.height, 10)
+      }
+    }
+  }
+
+  var sizeMap = {}
+  var sizeKeys = []
+
+  for (var f = 0; f < formats.length; f++) {
+    var fmt = formats[f]
+    var pf = fmt.pixelformat
+    var sizes = fmt.sizes || []
+    for (var s = 0; s < sizes.length; s++) {
+      var sz = sizes[s]
+      var key = sz.width + "x" + sz.height
+      if (!sizeMap[key]) {
+        sizeMap[key] = {
+          width: sz.width,
+          height: sz.height,
+          pfs: {},
+          firstPf: pf
+        }
+        sizeKeys.push(key)
+      }
+      sizeMap[key].pfs[pf] = true
+    }
+  }
+
+  var distinctList = []
+  for (var k = 0; k < sizeKeys.length; k++) {
+    var item = sizeMap[sizeKeys[k]]
+    var chosenPf = item.pfs["MJPG"] ? "MJPG" : item.firstPf
+    distinctList.push({
+      width: item.width,
+      height: item.height,
+      pixelformat: chosenPf
+    })
+  }
+
+  distinctList.sort(function(a, b) {
+    var areaA = a.width * a.height
+    var areaB = b.width * b.height
+    if (areaB !== areaA) return areaB - areaA
+    return b.width - a.width
+  })
+
+  var preferredMap = {}
+  for (var p = 0; p < PREFERRED_RESOLUTIONS.length; p++) {
+    var pref = PREFERRED_RESOLUTIONS[p]
+    preferredMap[pref[0] + "x" + pref[1]] = true
+  }
+
+  var filtered = []
+  for (var i = 0; i < distinctList.length; i++) {
+    var res = distinctList[i]
+    var resKey = res.width + "x" + res.height
+    var isPreferred = !!preferredMap[resKey]
+    var isCurrent = (curW !== null && curH !== null && res.width === curW && res.height === curH)
+
+    if (includeAll || isPreferred || isCurrent) {
+      filtered.push({
+        width: res.width,
+        height: res.height,
+        pixelformat: res.pixelformat,
+        value: resKey,
+        label: RESOLUTION_TAGS[resKey] || (res.width + "×" + res.height)
+      })
+    }
+  }
+
+  return filtered
+}
+
+// Returns descending frame rate options for that exact size and format.
+// By default filters to PREFERRED_FPS plus current fps if offered.
+// Each option provides { fps: number, value: string, label: string } with bare number labels.
+function fpsOptions(formats, width, height, pixelformat, current, all) {
+  if (!formats || !formats.length || !width || !height) return []
+
+  var includeAll = false
+  if (all === true) {
+    includeAll = true
+  } else if (current === true) {
+    includeAll = true
+    current = null
+  } else if (current && typeof current === "object" && current.all === true) {
+    includeAll = true
+  }
+
+  var curFps = null
+  if (current !== null && current !== undefined && current !== "") {
+    if (typeof current === "number") {
+      curFps = current
+    } else if (typeof current === "object" && current.fps !== undefined) {
+      curFps = parseFloat(current.fps)
+    } else {
+      var parsed = parseFloat(current)
+      if (!isNaN(parsed)) {
+        curFps = parsed
+      }
+    }
+  }
+
+  var w = parseInt(width, 10)
+  var h = parseInt(height, 10)
+  var targetPf = pixelformat || null
+
+  var matchedFormat = null
+  if (targetPf) {
+    for (var i = 0; i < formats.length; i++) {
+      if (formats[i].pixelformat === targetPf) {
+        matchedFormat = formats[i]
+        break
+      }
+    }
+  }
+
+  if (!matchedFormat) {
+    for (var j = 0; j < formats.length; j++) {
+      if (formats[j].pixelformat === "MJPG") {
+        for (var s = 0; s < (formats[j].sizes || []).length; s++) {
+          if (formats[j].sizes[s].width === w && formats[j].sizes[s].height === h) {
+            matchedFormat = formats[j]
+            break
+          }
+        }
+      }
+      if (matchedFormat) break
+    }
+  }
+  if (!matchedFormat) {
+    for (var k = 0; k < formats.length; k++) {
+      for (var s2 = 0; s2 < (formats[k].sizes || []).length; s2++) {
+        if (formats[k].sizes[s2].width === w && formats[k].sizes[s2].height === h) {
+          matchedFormat = formats[k]
+          break
+        }
+      }
+      if (matchedFormat) break
+    }
+  }
+
+  if (!matchedFormat) return []
+
+  var matchedSize = null
+  for (var m = 0; m < (matchedFormat.sizes || []).length; m++) {
+    if (matchedFormat.sizes[m].width === w && matchedFormat.sizes[m].height === h) {
+      matchedSize = matchedFormat.sizes[m]
+      break
+    }
+  }
+
+  if (!matchedSize || !matchedSize.fps) return []
+
+  var fpsCopy = matchedSize.fps.slice().sort(function(a, b) {
+    return b - a
+  })
+
+  var preferredMap = {}
+  for (var p = 0; p < PREFERRED_FPS.length; p++) {
+    preferredMap[PREFERRED_FPS[p]] = true
+  }
+
+  var options = []
+  for (var n = 0; n < fpsCopy.length; n++) {
+    var val = fpsCopy[n]
+    var isPreferred = !!preferredMap[val]
+    var isCurrent = (curFps !== null && val === curFps)
+
+    if (includeAll || isPreferred || isCurrent) {
+      options.push({
+        fps: val,
+        value: String(val),
+        label: String(val)
+      })
+    }
+  }
+
+  return options
+}
+
+// Pure resolver: picks pixelformat (keep current if offered, else MJPG, else first)
+// and clamps fps to the nearest available for that size (exact match preferred).
+// Returns { width, height, pixelformat, fps } or null if size is not enumerated.
+function pickCaptureMode(formats, current, width, height, fps) {
+  if (!formats || !formats.length || width === undefined || height === undefined) return null
+
+  var w = parseInt(width, 10)
+  var h = parseInt(height, 10)
+  if (isNaN(w) || isNaN(h)) return null
+
+  var formatsOfferingSize = {}
+  var firstOfferingPf = null
+  for (var f = 0; f < formats.length; f++) {
+    var fmt = formats[f]
+    var sizes = fmt.sizes || []
+    for (var s = 0; s < sizes.length; s++) {
+      if (sizes[s].width === w && sizes[s].height === h) {
+        formatsOfferingSize[fmt.pixelformat] = sizes[s]
+        if (!firstOfferingPf) {
+          firstOfferingPf = fmt.pixelformat
+        }
+        break
+      }
+    }
+  }
+
+  if (!firstOfferingPf) return null
+
+  var chosenPf = null
+  if (current && current.pixelformat && formatsOfferingSize[current.pixelformat]) {
+    chosenPf = current.pixelformat
+  } else if (formatsOfferingSize["MJPG"]) {
+    chosenPf = "MJPG"
+  } else {
+    chosenPf = firstOfferingPf
+  }
+
+  var sizeEntry = formatsOfferingSize[chosenPf]
+  var availableFps = (sizeEntry && sizeEntry.fps) ? sizeEntry.fps : []
+  if (!availableFps.length) {
+    return { width: w, height: h, pixelformat: chosenPf, fps: 30 }
+  }
+
+  var targetFps = undefined
+  if (fps !== undefined && fps !== null && fps !== "") {
+    targetFps = parseFloat(fps)
+  } else if (current && current.fps !== undefined && current.fps !== null) {
+    targetFps = parseFloat(current.fps)
+  } else {
+    targetFps = 30
+  }
+
+  var chosenFps = availableFps[0]
+  var minDiff = Math.abs(chosenFps - targetFps)
+
+  for (var i = 0; i < availableFps.length; i++) {
+    var candidate = availableFps[i]
+    if (candidate === targetFps) {
+      chosenFps = candidate
+      break
+    }
+    var diff = Math.abs(candidate - targetFps)
+    if (diff < minDiff) {
+      minDiff = diff
+      chosenFps = candidate
+    }
+  }
+
+  return {
+    width: w,
+    height: h,
+    pixelformat: chosenPf,
+    fps: chosenFps
+  }
 }
 
 // Command builder: query a single V4L2 control value
@@ -406,15 +806,25 @@ if (typeof module !== "undefined") {
   module.exports = {
     DEFAULT_DEVICE: DEFAULT_DEVICE,
     CONTROLS: CONTROLS,
+    PREFERRED_RESOLUTIONS: PREFERRED_RESOLUTIONS,
+    PREFERRED_FPS: PREFERRED_FPS,
+    RESOLUTION_TAGS: RESOLUTION_TAGS,
     parseV4l2Ctrls: parseV4l2Ctrls,
     parseCameractrls: parseCameractrls,
+    parseV4l2Formats: parseV4l2Formats,
+    parseV4l2CaptureMode: parseV4l2CaptureMode,
     buildV4l2ListCommand: buildV4l2ListCommand,
+    buildV4l2ListFormatsCommand: buildV4l2ListFormatsCommand,
+    buildV4l2SetCaptureModeCommand: buildV4l2SetCaptureModeCommand,
     buildV4l2GetCommand: buildV4l2GetCommand,
     buildV4l2SetCommand: buildV4l2SetCommand,
     buildFovListCommand: buildFovListCommand,
     buildFovSetCommand: buildFovSetCommand,
     getDefaults: getDefaults,
     buildResetCommands: buildResetCommands,
-    isControlActive: isControlActive
+    isControlActive: isControlActive,
+    resolutionOptions: resolutionOptions,
+    fpsOptions: fpsOptions,
+    pickCaptureMode: pickCaptureMode
   }
 }
