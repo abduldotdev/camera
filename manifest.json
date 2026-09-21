@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "abduldotdev",
   "license": "MIT",
-  "description": "Logitech webcam controller with Logi Tune-like settings",
+  "description": "Logi Tune-like controls for the Logitech MX Brio 4K webcam",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Camera",
-    "description": "Logitech webcam controller with Logi Tune-like settings",
+    "description": "Logi Tune-like controls for the Logitech MX Brio 4K webcam",
     "category": "Media",
     "allowMultiple": false,
     "defaultSection": "right"

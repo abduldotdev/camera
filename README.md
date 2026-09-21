@@ -1,6 +1,6 @@
 # abduldotdev.camera
 
-Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like controls for Logitech webcams on Linux, specifically optimized for the Logitech MX Brio (`046d:0944`).
+Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like controls on Linux. Made specifically for the **Logitech MX Brio 4K Ultra HD webcam** (`046d:0944`): FOV, zoom, pan/tilt, focus, exposure, white balance, capture mode and more. Other UVC webcams may work for the standard controls, but only the MX Brio 4K is tested and supported.
 
 ## Features
 
@@ -39,7 +39,7 @@ Before installing, ensure required dependencies are installed (see [Prerequisite
 To install and enable the camera plugin (ID: `abduldotdev.camera`) directly using the Omarchy CLI:
 
 ```bash
-omarchy plugin add https://github.com/abduldotdev/abduldotdev.camera.git --enable
+omarchy plugin add https://github.com/abduldotdev/camera.git --enable
 ```
 
 ### Development (from the omarchy-plugins monorepo)
