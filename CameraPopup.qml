@@ -28,7 +28,8 @@ PopupWindow {
   readonly property var coordinatorKey: owner || root
   readonly property var anchorWindow: anchorItem ? anchorItem.QsWindow.window : null
   readonly property color bg: Color.popups.background
-  readonly property color borderColor: Color.popups.border
+  property color borderColor: Color.popups.border
+  property var borderSpec: Border.localOrSurfaceSpec("popups", "border", borderColor, Color.popups.border, Math.max(1, Style.space(2)))
   readonly property color accent: Color.accent
   readonly property color muted: Color.muted
   readonly property color urgent: Color.urgent
@@ -341,13 +342,12 @@ PopupWindow {
     }
   }
 
-  Rectangle {
+  BorderSurface {
     id: card
     anchors.fill: parent
-    radius: 0
+    radius: Style.cornerRadius
     color: root.bg
-    border.color: root.borderColor
-    border.width: 2
+    borderSpec: root.borderSpec
     opacity: root.open ? 1 : 0
 
     Behavior on opacity {
