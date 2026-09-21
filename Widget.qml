@@ -35,7 +35,10 @@ Item {
   property var commandQueue: []
   property bool isDragging: false
 
-  function close() { popup.open = false }
+  function close() {
+    popup.open = false
+    root.captureBusy = false
+  }
   function open() {
     popup.open = true
     refresh()
@@ -190,7 +193,6 @@ Item {
   }
 
   function refresh() {
-    root.captureBusy = false
     if (!checkDeviceProc.running) checkDeviceProc.running = true
     if (!detectCameractrlsProc.running) detectCameractrlsProc.running = true
   }
@@ -441,6 +443,11 @@ Item {
     captureBusy: root.captureBusy
     modelName: root.modelName
     devicePath: root.device
+    onOpenChanged: {
+      if (!popup.open) {
+        root.captureBusy = false
+      }
+    }
     onRefreshRequested: root.refresh()
     onControlChanged: function(name, val) { root.setControl(name, val) }
     onCaptureModeChanged: function(w, h, fps) { root.setCaptureMode(w, h, fps) }
