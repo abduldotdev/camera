@@ -290,7 +290,7 @@ PopupWindow {
     property int maximum: 72000
     signal stepRequested(int nextVal)
 
-    function snap(v) { var s = Math.max(1, cpt.step); return Math.max(cpt.minimum, Math.min(cpt.maximum, Math.round(v / s) * s)) }
+    function snap(v) { var s = Math.max(1, cpt.step); return Math.max(cpt.minimum, Math.min(cpt.maximum, cpt.minimum + Math.round((v - cpt.minimum) / s) * s)) }
 
     property int liveVal: value
     onValueChanged: if (!slider.dragging) liveVal = value
