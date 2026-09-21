@@ -34,6 +34,18 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
 
 ## Installation
 
+Before installing, ensure required dependencies are installed (see [Prerequisites](#prerequisites)).
+
+To install and enable the camera plugin (ID: `abdul891.camera`) directly using the Omarchy CLI:
+
+```bash
+omarchy plugin add https://github.com/abdul891/abdul891.camera.git --enable
+```
+
+> **Note**: Update the repository URL above to your actual public repository URL once published to GitHub.
+
+### Development (from the omarchy-plugins monorepo)
+
 From the root of the `omarchy-plugins` repository, run:
 
 ```bash
@@ -41,6 +53,16 @@ From the root of the `omarchy-plugins` repository, run:
 ```
 
 `link.sh` scans for any directory containing `manifest.json` and creates a symlink under `~/.config/omarchy/plugins/abdul891.camera`. The shell will automatically load the bar widget.
+
+## Uninstall / Remove
+
+To remove the plugin from Omarchy:
+
+```bash
+omarchy plugin remove abdul891.camera
+```
+
+Removal leaves nothing behind. The plugin is stateless and does not write any configuration files, caches, or state to disk.
 
 ## Capture Mode (Resolution & Frame Rate)
 
@@ -158,3 +180,6 @@ The plugin includes two test suites located in `tests/`:
    node abdul891.camera/tests/hardware.test.js
    ```
 
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
