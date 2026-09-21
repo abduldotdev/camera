@@ -115,6 +115,16 @@ PopupWindow {
     return defaultVal
   }
 
+  function getMeta(name, field, fallback) {
+    if (root.controls && root.controls[name] && root.controls[name][field] !== undefined) {
+      return root.controls[name][field]
+    }
+    if (typeof Model !== "undefined" && Model.CONTROLS && Model.CONTROLS[name] && Model.CONTROLS[name][field] !== undefined) {
+      return Model.CONTROLS[name][field]
+    }
+    return fallback
+  }
+
   function isInactive(name) {
     if (root.controls && root.controls[name] && root.controls[name].inactive !== undefined) {
       return !!root.controls[name].inactive
@@ -280,8 +290,20 @@ PopupWindow {
     property int maximum: 72000
     signal stepRequested(int nextVal)
 
+    function snap(v) { var s = Math.max(1, cpt.step); return Math.max(cpt.minimum, Math.min(cpt.maximum, cpt.minimum + Math.round((v - cpt.minimum) / s) * s)) }
+
+    property int liveVal: value
+    onValueChanged: if (!slider.dragging) liveVal = value
+
     width: parent.width
     spacing: 3
+
+    Timer {
+      id: debounceTimer
+      interval: 150
+      repeat: false
+      onTriggered: cpt.stepRequested(cpt.liveVal)
+    }
 
     Row {
       width: parent.width
@@ -298,11 +320,34 @@ PopupWindow {
 
       Text {
         id: valLabel
-        text: cpt.value > 0 ? ("+" + cpt.value) : String(cpt.value)
+        text: cpt.liveVal > 0 ? ("+" + cpt.liveVal) : String(cpt.liveVal)
         color: root.safeMuted
         font.family: root.fontFamily
         font.pixelSize: 11
         anchors.verticalCenter: parent.verticalCenter
+      }
+    }
+
+    PanelSlider {
+      id: slider
+      width: parent.width
+      bar: root.bar
+      minimum: cpt.minimum
+      maximum: cpt.maximum
+      step: cpt.step
+      integer: true
+      value: cpt.value
+
+      onMoved: function(v) {
+        cpt.liveVal = snap(v)
+        root.isDragging = true
+        debounceTimer.restart()
+      }
+      onReleased: function(v) {
+        debounceTimer.stop()
+        root.isDragging = false
+        cpt.liveVal = snap(v)
+        cpt.stepRequested(cpt.liveVal)
       }
     }
 
@@ -531,18 +576,18 @@ PopupWindow {
           CameraPanTilt {
             label: "Pan"
             value: root.getVal("pan_absolute", 0)
-            minimum: -72000
-            maximum: 72000
-            step: 3600
+            minimum: root.getMeta("pan_absolute", "min", -72000)
+            maximum: root.getMeta("pan_absolute", "max", 72000)
+            step: root.getMeta("pan_absolute", "step", 3600)
             onStepRequested: function(v) { root.controlChanged("pan_absolute", v) }
           }
 
           CameraPanTilt {
             label: "Tilt"
             value: root.getVal("tilt_absolute", 0)
-            minimum: -72000
-            maximum: 72000
-            step: 3600
+            minimum: root.getMeta("tilt_absolute", "min", -72000)
+            maximum: root.getMeta("tilt_absolute", "max", 72000)
+            step: root.getMeta("tilt_absolute", "step", 3600)
             onStepRequested: function(v) { root.controlChanged("tilt_absolute", v) }
           }
 
