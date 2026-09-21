@@ -25,18 +25,14 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
 
 ## Prerequisites
 
+Both packages are in the official Arch `extra` repository. The plugin never installs anything itself; install them with Omarchy's package helper before enabling the plugin:
+
 - **`v4l-utils`** (`v4l2-ctl`): **Required**. Provides direct Linux kernel V4L2 ioctl control.
-  ```bash
-  sudo pacman -S v4l-utils
-  ```
-- **`cameractrls`**: **Optional**. Required for Logitech vendor Extension Unit (XU) Field of View (FOV: 65°/78°/90°) adjustments. If `cameractrls` is not installed, the FOV section is cleanly omitted while all other standard UVC controls remain fully operational.
-  ```bash
-  sudo pacman -S cameractrls
-  ```
-- **`shellcheck`**: **Optional prerequisite**. Only required if `.sh` shell scripts are introduced to the repository. The plugin itself uses pure JavaScript (`Model.js`) and QML, so no shell scripts are included by default.
-  ```bash
-  sudo pacman -S shellcheck
-  ```
+- **`cameractrls`**: **Optional**. Enables the Logitech vendor Extension Unit (XU) Field of View control (65°/78°/90°). If it is not installed, the FOV section is omitted and every other control keeps working.
+
+```bash
+omarchy pkg add v4l-utils cameractrls
+```
 
 ## Installation
 
@@ -48,15 +44,14 @@ To install and enable the camera plugin (ID: `abduldotdev.camera`) directly usin
 omarchy plugin add https://github.com/abduldotdev/camera.git --enable
 ```
 
-### Development (from the omarchy-plugins monorepo)
+### Development (local checkout)
 
-From the root of the `omarchy-plugins` repository, run:
+Clone the repository and symlink it into the Omarchy plugins directory; the shell picks up the bar widget automatically:
 
 ```bash
-./link.sh
+git clone https://github.com/abduldotdev/camera.git
+ln -sfn "$PWD/camera" ~/.config/omarchy/plugins/abduldotdev.camera
 ```
-
-`link.sh` scans for any directory containing `manifest.json` and creates a symlink under `~/.config/omarchy/plugins/abduldotdev.camera`. The shell will automatically load the bar widget.
 
 ## Uninstall / Remove
 
