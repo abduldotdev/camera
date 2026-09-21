@@ -50,7 +50,7 @@ Before submitting the plugin to the official marketplace, the user must perform 
 
 1. **Push to a public GitHub repository**:
    Push the plugin commits to a public GitHub repository, e.g. `https://github.com/abduldotdev/camera`.
-2. **(Optional, recommended) Add a preview screenshot**:
+2. **Preview screenshot** — DONE (`preview.png` in repo root, second screenshot in `assets/`):
    While preview assets are optional, adding one is strongly recommended. Capture a real screenshot of the camera widget on the bar with the camera settings popup open. Save it in the repository root using one of the accepted filenames: `preview.png`, `preview.jpg`, `preview.jpeg`, `preview.webp`, or `preview.avif`. Ensure the file complies with marketplace limits: maximum file size of 50 MB and maximum image resolution of 40 megapixels. The marketplace build runner will automatically strip metadata and generate optimized card and detail assets.
 3. **Confirm license choice**:
    Confirm that the `MIT` license choice and copyright attribution (`Copyright (c) 2026 Abdul Haseeb`) in [`LICENSE`](../LICENSE) and [`manifest.json`](../manifest.json) align with your preferences.

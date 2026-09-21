@@ -2,6 +2,12 @@
 
 Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like controls on Linux. Made specifically for the **Logitech MX Brio 4K Ultra HD webcam** (`046d:0944`): FOV, zoom, pan/tilt, focus, exposure, white balance, capture mode and more. Other UVC webcams may work for the standard controls, but only the MX Brio 4K is tested and supported.
 
+## Screenshots
+
+| Framing, optics & capture mode | Color, image & utilities |
+|---|---|
+| ![Framing & Optics and Capture Mode](preview.png) | ![Color & Image and Utilities](assets/color-and-utilities.png) |
+
 ## Features
 
 - **Bar Widget Integration**: Compact camera icon in the Omarchy bar displaying connection status (dimmed when `/dev/video0` is disconnected).
