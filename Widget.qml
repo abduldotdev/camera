@@ -165,7 +165,7 @@ Item {
       v4l2ListProc.queryGeneration = root.listGeneration
       v4l2ListProc.running = true
     }
-    if (root.fovAvailable && !cameractrlsListProc.running) {
+    if (popup.open && root.fovAvailable && !cameractrlsListProc.running) {
       cameractrlsListProc.queryGeneration = root.listGeneration
       cameractrlsListProc.running = true
     }
@@ -205,7 +205,7 @@ Item {
     command: ["sh", "-c", "command -v cameractrls"]
     onExited: function(exitCode) {
       root.hasCameractrls = (exitCode === 0)
-      if (root.hasCameractrls && root.devicePresent) {
+      if (root.hasCameractrls && root.devicePresent && (!root.fovAvailable || popup.open)) {
         if (!cameractrlsListProc.running) {
           cameractrlsListProc.queryGeneration = root.listGeneration
           cameractrlsListProc.running = true
