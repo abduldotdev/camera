@@ -759,24 +759,64 @@ assert.deepEqual(Model.resolutionOptions(null), [])
 // 12. fpsOptions
 // ---------------------------------------------------------------------------
 
+assert.deepEqual(Model.PREFERRED_FPS, [60, 30, 24, 15])
+
+// Preferred-only filtering (1080p MJPG offers 30, 24, 20, 15, 10, 7.5, 5; returns 30, 24, 15)
 const fps1080 = Model.fpsOptions(formats, 1920, 1080, "MJPG")
-assert.equal(fps1080.length, 7)
+assert.equal(fps1080.length, 3)
 assert.deepEqual(
   fps1080.map(function(o) { return o.fps }),
-  [30, 24, 20, 15, 10, 7.5, 5]
+  [30, 24, 15]
 )
 assert.deepEqual(
   fps1080.map(function(o) { return o.value }),
-  ["30", "24", "20", "15", "10", "7.5", "5"]
+  ["30", "24", "15"]
 )
 assert.deepEqual(
   fps1080.map(function(o) { return o.label }),
-  ["30 fps", "24 fps", "20 fps", "15 fps", "10 fps", "7.5 fps", "5 fps"]
+  ["30", "24", "15"]
 )
 
+// Current fps always included even when not in PREFERRED_FPS
+const fpsWith75 = Model.fpsOptions(formats, 1920, 1080, "MJPG", 7.5)
+assert.equal(fpsWith75.length, 4)
+assert.deepEqual(
+  fpsWith75.map(function(o) { return o.fps }),
+  [30, 24, 15, 7.5]
+)
+assert.deepEqual(
+  fpsWith75.map(function(o) { return o.label }),
+  ["30", "24", "15", "7.5"]
+)
+
+const fpsWith20 = Model.fpsOptions(formats, 1920, 1080, "MJPG", 20)
+assert.equal(fpsWith20.length, 4)
+assert.deepEqual(
+  fpsWith20.map(function(o) { return o.fps }),
+  [30, 24, 20, 15]
+)
+
+// All frame rates returned when all: true
+const fpsAll = Model.fpsOptions(formats, 1920, 1080, "MJPG", null, true)
+assert.equal(fpsAll.length, 7)
+assert.deepEqual(
+  fpsAll.map(function(o) { return o.fps }),
+  [30, 24, 20, 15, 10, 7.5, 5]
+)
+assert.deepEqual(
+  fpsAll.map(function(o) { return o.label }),
+  ["30", "24", "20", "15", "10", "7.5", "5"]
+)
+
+// 720p preferred fps (offers 60, 30, 24, 20, 15, 10, 7.5, 5; returns 60, 30, 24, 15)
 const fps720 = Model.fpsOptions(formats, 1280, 720, "MJPG")
+assert.equal(fps720.length, 4)
+assert.deepEqual(
+  fps720.map(function(o) { return o.fps }),
+  [60, 30, 24, 15]
+)
 assert.equal(fps720[0].fps, 60)
-assert.equal(fps720[0].label, "60 fps")
+assert.equal(fps720[0].label, "60")
 
 // Unknown size / missing format
 assert.deepEqual(Model.fpsOptions(formats, 9999, 9999, "MJPG"), [])
