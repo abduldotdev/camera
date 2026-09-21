@@ -4,6 +4,7 @@
   "name": "Camera",
   "version": "1.0.0",
   "author": "abdul891",
+  "license": "MIT",
   "description": "Logitech webcam controller with Logi Tune-like settings",
   "kinds": [
     "bar-widget"
