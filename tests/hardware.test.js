@@ -107,14 +107,13 @@ function pickDifferentValue(parsedCtrl, currentVal) {
 const initialV4l2 = getV4l2Controls()
 const initialFov = getFovControl()
 const originalValues = {}
-for (const name of Object.keys(Model.CONTROLS)) {
-  if (name === "logitech_brio_fov") {
-    if (initialFov !== undefined) {
-      originalValues[name] = initialFov
-    }
-  } else if (initialV4l2[name] && initialV4l2[name].value !== undefined) {
+for (const name of Object.keys(initialV4l2)) {
+  if (initialV4l2[name] && initialV4l2[name].value !== undefined) {
     originalValues[name] = initialV4l2[name].value
   }
+}
+if (initialFov !== undefined) {
+  originalValues.logitech_brio_fov = initialFov
 }
 
 // Snapshot original capture mode
@@ -425,7 +424,7 @@ try {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150)
 
       const bBefore = getCurrentValue("brightness")
-      const bTarget = bBefore <= 240 ? bBefore + 5 : bBefore - 5
+      const bTarget = pickDifferentValue(initialV4l2.brightness, bBefore)
       runCmd(Model.buildV4l2SetCommand(device, "brightness", bTarget))
       const bAfter = getCurrentValue("brightness")
       assert.equal(bAfter, bTarget, `Brightness control failed while streaming (got ${bAfter}, expected ${bTarget})`)
