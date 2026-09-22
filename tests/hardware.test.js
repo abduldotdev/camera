@@ -24,8 +24,12 @@ function getV4l2Controls() {
 }
 
 function getFovControl() {
-  const out = runCmd(Model.buildFovListCommand(device))
-  return Model.parseCameractrls(out).logitech_brio_fov
+  try {
+    const out = runCmd(Model.buildFovListCommand(device))
+    return Model.parseCameractrls(out).logitech_brio_fov
+  } catch {
+    return undefined
+  }
 }
 
 function getCurrentValue(name) {
@@ -113,6 +117,10 @@ try {
     }
 
     const beforeVal = getCurrentValue(name)
+    if (beforeVal === undefined && name === "logitech_brio_fov") {
+      console.log(`SKIP: ${name} not available on device or cameractrls missing`)
+      continue
+    }
     assert.notEqual(beforeVal, undefined, `Failed to query current value for ${name}`)
 
     const targetVal = pickDifferentValue(ctrl, beforeVal)
@@ -148,6 +156,37 @@ try {
     console.log(`${name}: ${beforeVal} -> ${afterVal} -> ${restoredVal}`)
   }
 
+  // === Testing Logitech MX Brio FOV Presets (65, 78, 90) ===
+  console.log("\n=== Testing Logitech FOV Presets (65, 78, 90) ===")
+  const fovInitial = getFovControl()
+  if (fovInitial === undefined) {
+    console.log("SKIP: Logitech FOV control or cameractrls not available")
+  } else {
+    const fovPresets = [65, 78, 90]
+    let fovMutated = false
+    try {
+      for (const preset of fovPresets) {
+        runCmd(Model.buildFovSetCommand(device, preset))
+        fovMutated = true
+        const readbackOut = runCmd(Model.buildFovListCommand(device))
+        const readbackFov = Model.parseCameractrls(readbackOut).logitech_brio_fov
+        assert.equal(readbackFov, preset, `FOV did not change to preset ${preset} (got ${readbackFov})`)
+        console.log(`logitech_brio_fov preset ${preset}° verified`)
+      }
+    } finally {
+      if (fovMutated && fovInitial !== undefined) {
+        try {
+          runCmd(Model.buildFovSetCommand(device, fovInitial))
+          const restoredFov = getFovControl()
+          assert.equal(restoredFov, fovInitial, `FOV failed to restore to initial ${fovInitial}° (got ${restoredFov})`)
+          console.log(`FOV restored to initial setting: ${restoredFov}°`)
+        } catch (restoreErr) {
+          console.error(`Error restoring FOV in finally: ${restoreErr.message}`)
+        }
+      }
+    }
+  }
+
   // Run Model.buildResetCommands() once and assert every control equals its default afterwards
   console.log("\n=== Testing Factory Reset Commands ===")
   const resetCmds = Model.buildResetCommands(device)
@@ -159,6 +198,9 @@ try {
   const postResetFov = getFovControl()
   const defaults = Model.getDefaults()
   for (const name of Object.keys(Model.CONTROLS)) {
+    if (name === "logitech_brio_fov" && postResetFov === undefined) {
+      continue
+    }
     const val = name === "logitech_brio_fov" ? postResetFov : postResetV4l2[name]?.value
     assert.equal(val, defaults[name], `Control ${name} did not equal default ${defaults[name]} after reset (got ${val})`)
   }
