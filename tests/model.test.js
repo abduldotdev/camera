@@ -1,4 +1,8 @@
 const assert = require("node:assert/strict")
+const cp = require("node:child_process")
+const fs = require("node:fs")
+const os = require("node:os")
+const path = require("node:path")
 const Model = require("../Model.js")
 
 // ---------------------------------------------------------------------------
@@ -1109,6 +1113,123 @@ assert.deepEqual(Model.buildV4l2InfoCommand(), [
   "/dev/video0",
   "--info"
 ])
+
+// Test buildV4l2DevicesCommand end-to-end execution with a stub v4l2-ctl on PATH
+// Covers:
+// 1) A card name containing parentheses: "Dummy video device (0x0000)"
+// 2) An empty bus_info header: "Platform Cam ():"
+// 3) A metadata node (/dev/video1) that must be filtered out
+const stubTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v4l2-stub-"))
+try {
+  const stubScript = [
+    "#!/bin/sh",
+    'if [ "$1" = "--list-devices" ]; then',
+    "  cat <<'EOF'",
+    "Dummy video device (0x0000) (platform:v4l2loopback-000):",
+    "\t/dev/video10",
+    "",
+    "Platform Cam ():",
+    "\t/dev/video8",
+    "",
+    "Webcam With Meta (usb-0000:00:14.0-1):",
+    "\t/dev/video0",
+    "\t/dev/video1",
+    "EOF",
+    "  exit 0",
+    "fi",
+    'if [ "$1" = "-d" ] && [ "$3" = "--info" ]; then',
+    '  case "$2" in',
+    "    /dev/video10)",
+    "      cat <<'EOF'",
+    "Driver Info:",
+    "\tDriver name   : v4l2 loopback",
+    "\tCard type     : Dummy video device (0x0000)",
+    "\tBus info      : platform:v4l2loopback-000",
+    "\tDriver flags  : 0x00000001",
+    "Device Caps   : 0x05200001",
+    "\tVideo Capture",
+    "\tStreaming",
+    "EOF",
+    "      exit 0",
+    "      ;;",
+    "    /dev/video8)",
+    "      cat <<'EOF'",
+    "Driver Info:",
+    "\tDriver name   : platform-cam",
+    "\tCard type     : Platform Cam",
+    "\tBus info      : ",
+    "\tDriver flags  : 0x00000001",
+    "Device Caps   : 0x04200001",
+    "\tVideo Capture",
+    "\tStreaming",
+    "EOF",
+    "      exit 0",
+    "      ;;",
+    "    /dev/video0)",
+    "      cat <<'EOF'",
+    "Driver Info:",
+    "\tDriver name   : uvcvideo",
+    "\tCard type     : Webcam With Meta",
+    "\tBus info      : usb-0000:00:14.0-1",
+    "\tDriver flags  : 0x00000001",
+    "Device Caps   : 0x04200001",
+    "\tVideo Capture",
+    "\tStreaming",
+    "EOF",
+    "      exit 0",
+    "      ;;",
+    "    /dev/video1)",
+    "      cat <<'EOF'",
+    "Driver Info:",
+    "\tDriver name   : uvcvideo",
+    "\tCard type     : Webcam With Meta",
+    "\tBus info      : usb-0000:00:14.0-1",
+    "\tDriver flags  : 0x00000001",
+    "Device Caps   : 0x04a00000",
+    "\tMetadata Capture",
+    "\tStreaming",
+    "EOF",
+    "      exit 0",
+    "      ;;",
+    "  esac",
+    "fi",
+    "exit 1"
+  ].join("\n")
+
+  const stubPath = path.join(stubTmpDir, "v4l2-ctl")
+  fs.writeFileSync(stubPath, stubScript, { mode: 0o755 })
+
+  const stubEnv = Object.assign({}, process.env, {
+    PATH: stubTmpDir + path.delimiter + (process.env.PATH || "")
+  })
+  const stubCmd = Model.buildV4l2DevicesCommand()
+  const stubOut = cp.execFileSync(stubCmd[0], stubCmd.slice(1), {
+    encoding: "utf8",
+    env: stubEnv
+  })
+  const stubParsed = Model.parseV4l2Devices(stubOut)
+  assert.equal(stubParsed.length, 3)
+  assert.deepEqual(stubParsed[0], {
+    path: "/dev/video10",
+    name: "Dummy video device (0x0000)",
+    bus: "platform:v4l2loopback-000",
+    card: "Dummy video device (0x0000)"
+  })
+  assert.deepEqual(stubParsed[1], {
+    path: "/dev/video8",
+    name: "Platform Cam",
+    bus: "",
+    card: "Platform Cam"
+  })
+  assert.deepEqual(stubParsed[2], {
+    path: "/dev/video0",
+    name: "Webcam With Meta",
+    bus: "usb-0000:00:14.0-1",
+    card: "Webcam With Meta"
+  })
+} finally {
+  fs.rmSync(stubTmpDir, { recursive: true, force: true })
+}
 
 // ---------------------------------------------------------------------------
 // 20. Generic UVC Fixture and Device-Aware Reset Commands
