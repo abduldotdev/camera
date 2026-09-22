@@ -98,7 +98,7 @@ The table below documents the Logitech MX Brio reference inventory across its 18
 | | `contrast` | Integer | 0 .. 255 | 128 | `v4l2-ctl` | Image contrast curve. |
 | | `saturation` | Integer | 0 .. 255 | 128 | `v4l2-ctl` | Image chroma saturation. |
 | | `sharpness` | Integer | 0 .. 255 | 128 | `v4l2-ctl` | Image edge sharpness filtering. |
-| **Utilities** | `power_line_frequency` | Menu | 0 (Off), 1 (50 Hz), 2 (60 Hz) | 2 (60 Hz) | `v4l2-ctl` | Anti-flicker filter matching local AC mains power frequency. |
+| **Utilities** | `power_line_frequency` | Menu | 0 (Disabled), 1 (50 Hz), 2 (60 Hz) | 2 (60 Hz) | `v4l2-ctl` | Anti-flicker filter matching local AC mains power frequency. |
 | | `backlight_compensation` | Integer | 0 (Off), 1 (On) | 1 | `v4l2-ctl` | Backlight shadow reduction. |
 
 ## Logi Tune Feature Support on Linux
@@ -158,7 +158,7 @@ omarchy-shell abduldotdev.camera setCtrl logitech_brio_fov 78
 omarchy-shell abduldotdev.camera getCaptureMode
 # Output: 1280x720@30 MJPG
 
-# Set capture mode (resolution WxH, and optional fps)
+# Set capture mode (both resolution WxH and fps arguments are required)
 omarchy-shell abduldotdev.camera setCaptureMode 1920x1080 30
 omarchy-shell abduldotdev.camera setCaptureMode 1280x720 60
 
