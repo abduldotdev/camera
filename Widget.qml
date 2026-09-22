@@ -49,6 +49,10 @@ Item {
     root.captureBusy = false
   }
   function open() {
+    if (popup.open) {
+      refresh()
+      return
+    }
     root.previewWasActiveDuringSession = false
     root.previewActive = false
     root.previewError = ""
@@ -158,7 +162,7 @@ Item {
     var cmd = (typeof Model.buildV4l2SetCaptureModeCommand === "function")
       ? Model.buildV4l2SetCaptureModeCommand(root.device, picked)
       : ["v4l2-ctl", "-d", root.device, "--set-fmt-video=width=" + picked.width + ",height=" + picked.height + ",pixelformat=" + picked.pixelformat, "--set-parm=" + picked.fps]
-    queueCommand(cmd, "capture")
+    queueCommand(cmd, "capture", root.device)
   }
 
   function setCaptureModeFromIpc(resolution, fps) {
@@ -192,12 +196,14 @@ Item {
       ? Model.buildV4l2SetCaptureModeCommand(root.device, mode)
       : ["v4l2-ctl", "-d", root.device, "--set-fmt-video=width=" + mode.width + ",height=" + mode.height + ",pixelformat=" + mode.pixelformat, "--set-parm=" + mode.fps]
     root.pendingCaptureCount++
-    queueCommand(cmd, "capture")
+    queueCommand(cmd, "capture", root.device)
   }
 
-  function queueCommand(cmd, kind) {
+  function queueCommand(cmd, kind, device) {
     if (!cmd || !cmd.length) return
-    commandQueue.push({ cmd: cmd, kind: kind || "control" })
+    var entry = { cmd: cmd, kind: kind || "control" }
+    if (device) entry.device = device
+    commandQueue.push(entry)
     pumpCommandQueue()
   }
 
@@ -213,7 +219,8 @@ Item {
     var kind = Array.isArray(item) ? "control" : (item.kind || "control")
     cmdExecProc.currentKind = kind
     if (kind === "capture") {
-      cmdExecProc.command = ["sh", "-c", "for i in $(seq 1 15); do if ! fuser \"$1\" >/dev/null 2>&1; then break; fi; sleep 0.05; done; shift; exec \"$@\"", "--", root.device].concat(baseCmd)
+      var targetDev = (!Array.isArray(item) && item.device) ? item.device : root.device
+      cmdExecProc.command = ["sh", "-c", "for i in $(seq 1 15); do if ! fuser \"$1\" >/dev/null 2>&1; then break; fi; sleep 0.05; done; shift; exec \"$@\"", "--", targetDev].concat(baseCmd)
     } else {
       cmdExecProc.command = baseCmd
     }
@@ -330,10 +337,12 @@ Item {
       selected = Model.selectActiveDevice(devices, root.device)
     }
     if (!selected) {
+      root.listGeneration++
+      root.commandQueue = []
+      root.pendingCaptureCount = 0
       root.previewActive = false
       root.previewError = ""
       root.releasePreviewedDevice()
-      root.listGeneration++
       root.device = ""
       root.modelName = "No camera connected"
       root.devicePresent = false
@@ -346,8 +355,6 @@ Item {
       root.captureFormats = []
       root.captureFormatsQueried = false
       root.captureBusy = false
-      root.pendingCaptureCount = 0
-      root.commandQueue = []
       return
     }
     if (selected.path === root.device) {
@@ -360,11 +367,12 @@ Item {
 
   function switchTo(deviceObj) {
     if (!deviceObj || !deviceObj.path) return
+    root.listGeneration++
+    root.commandQueue = []
+    root.pendingCaptureCount = 0
     root.previewActive = false
     root.previewError = ""
     root.releasePreviewedDevice()
-    root.listGeneration++
-    root.commandQueue = []
     root.device = deviceObj.path
     root.modelName = deviceObj.card || deviceObj.name || "No camera connected"
     root.permissionDenied = false
@@ -377,7 +385,6 @@ Item {
     root.captureFormats = []
     root.captureFormatsQueried = false
     root.captureBusy = false
-    root.pendingCaptureCount = 0
     root.startDeviceCheck()
   }
 
@@ -583,7 +590,12 @@ Item {
     }
     onExited: function(exitCode) {
       var sameRead = v4l2ListProc.queryDevice === root.device && v4l2ListProc.queryGeneration === root.listGeneration
-      if (sameRead && exitCode !== 0) root.devicePresent = false
+      if (sameRead && exitCode !== 0) {
+        root.devicePresent = false
+        root.previewActive = false
+        root.previewError = ""
+        root.previewWasActiveDuringSession = false
+      }
       if (root.refreshPending && !cameractrlsListProc.running) {
         root.refreshPending = false
         root.readControls()
