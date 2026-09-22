@@ -9,8 +9,9 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
 ## Features
 
 - **Bar Widget Integration**: Compact camera icon in the Omarchy bar displaying connection status (dimmed when no capture device is discovered).
-- **Fast & Stateless**: Communicates with hardware via non-blocking asynchronous `v4l2-ctl` and `cameractrls` calls. Zero open video streams while closed; live viewfinder opens on demand strictly when the settings popup is open.
-- **In-Popup Live Viewfinder**: On-demand 16:9 live video preview stream with strict V4L2 ownership lifecycle: opens the selected capture device only when the popup is visible, streams at the configured capture mode, and synchronously releases the device file descriptor immediately on close, re-applying the configured driver default so external conferencing apps are never locked out. Includes an atomic capture mode interlock (pausing preview across queued format mutations until Qt reports the camera inactive) and six explicit stream states: Active, Inactive, Busy (`EBUSY`), Permission Denied (`EACCES`), Disconnected, and Unavailable. Hardware controls remain fully responsive and non-blocking during preview errors.
+- **Fast & Stateless**: Communicates with hardware via non-blocking asynchronous `v4l2-ctl` and `cameractrls` calls. Zero open video streams while closed; opening the settings popup does not start the live viewfinder, which starts only on an explicit Start preview click, a click on the idle frame, or `omarchy-shell abduldotdev.camera setPreviewActive 1`, and releases the device file descriptor on Stop preview, popup close, and device switch.
+- **In-Popup Live Viewfinder**: On-demand 16:9 live video preview stream with strict V4L2 ownership lifecycle: does not start when the popup opens, starting only upon an explicit Start preview click, clicking the idle frame, or `omarchy-shell abduldotdev.camera setPreviewActive 1`. Releases the capture device file descriptor immediately on Stop preview, popup close, or device switch, re-applying the configured driver capture mode only after a preview that actually streamed (skipped entirely when the preview never started, and aimed at the previewed device on switch) so external conferencing apps are never locked out. Includes an atomic capture mode interlock (pausing preview across queued format mutations until Qt reports the camera inactive) and seven explicit stream states: Idle (`Preview off`), Active, Inactive (`Starting preview`), Busy (`EBUSY`), Permission Denied (`EACCES`), Disconnected, and Unavailable. Hardware controls remain fully responsive and non-blocking during preview errors.
+- **Mirror Toggle**: Horizontally flips the in-popup preview image only as a pure view transform, identical on every camera without writing any V4L2 or cameractrls control (the Logitech MX Brio exposes no `hflip`, `vflip`, or `horizontal_flip`). The frame overlay text, action buttons, and settings rows stay unflipped. The toggle is remembered for the life of the shell process, surviving popup close and device switch while starting off in a fresh widget.
 - **Multi-Camera Selector**: A Camera selector sits under the header separator and above the viewfinder only when more than one capture device is discovered, labelled by card name, with the path appended when two cards share a name.
 - **Right-Edge Vertical Scrollbar**: A visible, draggable right-edge vertical scrollbar (`ScrollBar.AsNeeded`) that appears when content overflows, supporting click-and-drag handle scrubbing, track clicking, and mouse-wheel scrolling when hovered.
 - **Wheel-Safe Control Isolation**: Scrolling the mouse wheel anywhere over the popup content scrolls the settings list and never modifies any slider value. Sliders change strictly by dragging or clicking the knob/track, pressing step buttons, or via IPC commands.
@@ -63,7 +64,7 @@ To remove the plugin from Omarchy:
 omarchy plugin remove abduldotdev.camera
 ```
 
-Removal leaves nothing behind. The plugin is stateless and does not write any configuration files, caches, or state to disk.
+Removal leaves nothing behind. The plugin is stateless and does not write any configuration files, caches, or state to disk. Both preview activation and mirror are in-memory session values never written to disk: mirror survives popup close and device switch for the life of the shell process (starting off in a fresh widget), whereas preview activation resets on every popup open and device switch.
 
 ## Capture Mode (Resolution & Frame Rate)
 
@@ -71,7 +72,7 @@ The plugin allows viewing the active capture mode and configuring the driver's d
 
 ### Behaviour & Limitations
 
-- **Persistent Driver Default**: The configured capture mode persists in the `uvcvideo` kernel driver across process opens. It serves as the initial default for non-negotiating V4L2 tools and applications (e.g. `v4l2-ctl --stream-mmap`, `mpv` on the selected capture device without size arguments, or cameractrls preview). The in-popup live preview streams at the configured capture mode and automatically re-applies the driver default upon closing the popup so other applications continue to receive the user-configured resolution and frame rate.
+- **Persistent Driver Default**: The configured capture mode persists in the `uvcvideo` kernel driver across process opens. It serves as the initial default for non-negotiating V4L2 tools and applications (e.g. `v4l2-ctl --stream-mmap`, `mpv` on the selected capture device without size arguments, or cameractrls preview). The in-popup live preview streams at the configured capture mode and automatically re-applies the driver default only after a preview that actually streamed (on Stop preview, popup close, or device switch), skipping re-application entirely when the preview never started, so other applications continue to receive the user-configured resolution and frame rate.
 - **Exclusive Streaming Lock (`EBUSY`)**: Capture format and frame rate cannot be modified while any process is streaming video from the selected capture device. Attempting to set resolution or framerate while streaming returns `EBUSY` (`Device or resource busy`), and the popup indicates that the camera is currently in use.
 - **Negotiating Applications Override Mode**: Video conferencing applications, browsers, and streaming pipelines (such as Google Meet, Zoom, OBS Studio, ffmpeg, GStreamer, and PipeWire camera portal clients) negotiate their own resolution and framerate per stream upon opening the device. The plugin's default does not constrain negotiating apps; however, the popup actively displays whatever mode the streaming app negotiated.
 - **USB Link Speed & 4K Availability**: 4K resolution (3840×2160) requires a USB 3 link. Over a USB 2.0 link (480 Mbps), the camera hardware enumerates modes up to 1920×1080 @ 30 fps or 1600×896 @ 60 fps in MJPG.
@@ -122,7 +123,8 @@ FOV is the MX Brio vendor control, and the other rows apply when the active came
 | **RightSight AI Auto-Framing** | **No** | **Impossible on Linux**. RightSight is a proprietary software neural network running on the host machine inside the Logi Tune app on macOS/Windows; it is not camera hardware. |
 | **Show Mode (Desk Tracking)** | **No** | **Impossible on Linux**. Show Mode relies on proprietary host software running computer vision on the video feed to detect when the camera tilts down toward a desk. |
 | **Logitech Firmware Updates** | **No** | **Impossible on Linux**. Logitech firmware distribution uses proprietary encrypted USB transport. MX Brio is not supported by `fwupd` / Linux Vendor Firmware Service (LVFS). |
-| **Live Viewfinder (In-Popup)** | **Yes** | Supported on demand inside the settings popup with a safe V4L2 lifecycle: streams at the configured capture mode only while the popup is open, releases the selected capture device immediately on close, re-applies the configured capture mode driver default on close, interlocks with capture mode mutations to prevent `EBUSY`, and reports six distinct stream states (Active, Inactive, Busy, Permission Denied, Disconnected, Unavailable). Controls remain unblocked during stream errors. Continuous viewfinder in the bar remains omitted to prevent persistent camera locking. |
+| **Live Viewfinder (In-Popup)** | **Yes** | Supported on demand inside the settings popup with a safe V4L2 lifecycle: does not start when the settings popup opens, starting only on an explicit Start preview click, a click on the idle frame, or `omarchy-shell abduldotdev.camera setPreviewActive 1`. Releases the selected capture device immediately on Stop preview, popup close, or device switch. Driver-format restore runs only after a preview that actually reached active (including stop while the popup stays open and device switch aimed at the streamed device), and is skipped entirely when the preview never started. Interlocks with capture mode mutations to prevent `EBUSY`, and reports seven distinct stream states (Idle shown as `Preview off`, Active, Inactive, Busy, Permission Denied, Disconnected, Unavailable). Controls remain unblocked during stream errors. Continuous viewfinder in the bar remains omitted to prevent persistent camera locking. |
+| **Mirror** | **Yes** | Supported as an in-popup preview view transform (horizontal flip) remembered in-memory until the shell exits, surviving popup close and device switch while starting off in a fresh widget. It is not a V4L2 control; the `v4l2-ctl -d /dev/video0 --list-ctrls` list on the Logitech MX Brio reference device exposes no `hflip`, `vflip`, or `horizontal_flip`, which is why the reference device cannot store it. Overlay text, action buttons, and settings rows are never flipped. |
 
 ## IPC Interface Contract
 
@@ -170,14 +172,32 @@ omarchy-shell abduldotdev.camera setDevice /dev/video2
 
 # List discovered capture devices as a JSON array of {path, name} objects
 omarchy-shell abduldotdev.camera listDevices
+
+# Query current preview state
+omarchy-shell abduldotdev.camera getPreview
+# Output: idle
+
+# Activate or stop the live preview
+omarchy-shell abduldotdev.camera setPreviewActive 1
+omarchy-shell abduldotdev.camera setPreviewActive 0
+
+# Query preview mirror state
+omarchy-shell abduldotdev.camera getMirror
+# Output: 0
+
+# Enable or disable preview mirror
+omarchy-shell abduldotdev.camera setMirror 1
+omarchy-shell abduldotdev.camera setMirror 0
 ```
+
+`getPreview` prints one of `idle`, `active`, `inactive`, `busy`, `permission`, `disconnected`, `unavailable`. `getMirror` prints `0` or `1`. Any setter value other than `0` or `1` leaves the flag unchanged.
 
 ## Testing
 
 The plugin includes two test suites located in `tests/`:
 
 1. **Model & Parser Unit Tests** (offline):
-   Validates V4L2 and cameractrls CLI output parsing, control metadata definitions, command builders, dependency rules, and factory defaults without requiring camera hardware. Also covers discovery parsing, the auto-exposure resolver, and a generic UVC fixture.
+   Validates V4L2 and cameractrls CLI output parsing, control metadata definitions, command builders, dependency rules, and factory defaults without requiring camera hardware. Also covers discovery parsing, the auto-exposure resolver, and a generic UVC fixture. In addition, `tests/model.test.js` now covers `PREVIEW_STATES`, `previewMayAcquire`, and `parseFlag`.
    ```bash
    node tests/model.test.js
    ```
