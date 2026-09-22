@@ -535,7 +535,7 @@ Item {
           var parsed = Model.parseCameractrls(text)
           if (parsed && parsed.logitech_brio_fov !== undefined) {
             cameractrlsListProc.foundFov = true
-            if (cameractrlsListProc.queryDevice === root.device) {
+            if (cameractrlsListProc.queryDevice === root.device && cameractrlsListProc.queryGeneration === root.listGeneration) {
               root.fovControl = parsed
             }
           }
