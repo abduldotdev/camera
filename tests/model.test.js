@@ -880,10 +880,9 @@ assert.equal(Model.CONTROLS.resolution, undefined)
 assert.equal(Model.CONTROLS.pixelformat, undefined)
 
 // ---------------------------------------------------------------------------
-// 15. ZOOM_WHEEL_MULTIPLIER and PREVIEW_STATES
+// 15. PREVIEW_STATES
 // ---------------------------------------------------------------------------
 
-assert.equal(Model.ZOOM_WHEEL_MULTIPLIER, 10)
 assert.deepEqual(Model.PREVIEW_STATES, [
   "active",
   "inactive",
@@ -895,27 +894,7 @@ assert.deepEqual(Model.PREVIEW_STATES, [
 assert.equal(Model.PREVIEW_STATES.length, 6)
 
 // ---------------------------------------------------------------------------
-// 16. wheelStep (delta, multiplier, clamping)
-// ---------------------------------------------------------------------------
-
-// +/-10 per notch with multiplier 10
-assert.equal(Model.wheelStep(150, 120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 160)
-assert.equal(Model.wheelStep(150, -120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 140)
-
-// Clamping at min (100) and max (400)
-assert.equal(Model.wheelStep(105, -120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 100)
-assert.equal(Model.wheelStep(100, -120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 100)
-assert.equal(Model.wheelStep(395, 120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 400)
-assert.equal(Model.wheelStep(400, 120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 400)
-
-// Multiplier 1 for non-zoom controls (single-step)
-assert.equal(Model.wheelStep(128, 120, 1, 1, 0, 255), 129)
-assert.equal(Model.wheelStep(128, -120, 1, 1, 0, 255), 127)
-assert.equal(Model.wheelStep(0, -120, 1, 1, 0, 255), 0)
-assert.equal(Model.wheelStep(255, 120, 1, 1, 0, 255), 255)
-
-// ---------------------------------------------------------------------------
-// 17. PIXEL_FORMAT map and pickCameraFormat
+// 16. PIXEL_FORMAT map and pickCameraFormat
 // ---------------------------------------------------------------------------
 
 assert.equal(Model.PIXEL_FORMAT.MJPG, 29)

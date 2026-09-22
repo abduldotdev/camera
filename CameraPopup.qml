@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtMultimedia
 import Quickshell
 import Quickshell.Hyprland
@@ -220,13 +221,13 @@ PopupWindow {
 
   component CameraSlider: Column {
     id: cs
+    property alias slider: slider
     property string label: ""
     property string unit: ""
     property real minimum: 0
     property real maximum: 255
     property real step: 1
     property real value: 0
-    property int wheelMultiplier: 1
     property bool controlEnabled: true
     property string disabledHint: "Controlled automatically"
     signal committed(real val)
@@ -298,21 +299,6 @@ PopupWindow {
           root.isDragging = false
           cs.liveVal = Math.round(v)
           cs.committed(cs.liveVal)
-        }
-      }
-
-      MouseArea {
-        anchors.fill: parent
-        enabled: cs.controlEnabled && cs.wheelMultiplier > 1
-        acceptedButtons: Qt.NoButton
-        onWheel: function(wheel) {
-          wheel.accepted = true
-          var next = Model.wheelStep(cs.liveVal, wheel.angleDelta.y, cs.step, cs.wheelMultiplier, cs.minimum, cs.maximum)
-          if (slider.integer) next = Math.round(next)
-          cs.liveVal = next
-          slider.liveValue = next
-          root.isDragging = true
-          debounceTimer.restart()
         }
       }
     }
@@ -675,6 +661,7 @@ PopupWindow {
       // Online controls flickable
       Flickable {
         id: flick
+        objectName: "popupFlick"
         visible: root.devicePresent
         width: parent.width
         height: Math.max(80, mainCol.height - headerItem.height - headerSep.height - previewFrame.height - (mainCol.spacing * 3))
@@ -683,9 +670,25 @@ PopupWindow {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
+        ScrollBar.vertical: ScrollBar {
+          id: vbar
+          policy: ScrollBar.AsNeeded
+          width: 8
+          contentItem: Rectangle {
+            implicitWidth: 6
+            implicitHeight: 32
+            radius: Style.cornerRadius
+            color: vbar.pressed ? root.fg : (vbar.hovered ? root.fg : root.safeMuted)
+            opacity: vbar.active || vbar.hovered ? 0.85 : 0.4
+            Behavior on opacity {
+              NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+            }
+          }
+        }
+
         Column {
           id: sectionsCol
-          width: flick.width - 6
+          width: flick.width - 12
           spacing: 10
 
           // 1. Framing & Optics
@@ -708,12 +711,12 @@ PopupWindow {
           }
 
           CameraSlider {
+            objectName: "slider_zoom_absolute"
             label: "Digital Zoom"
             unit: "%"
             minimum: 100
             maximum: 400
             step: 1
-            wheelMultiplier: Model.ZOOM_WHEEL_MULTIPLIER
             value: root.getVal("zoom_absolute", 100)
             onCommitted: function(v) { root.controlChanged("zoom_absolute", v) }
           }
@@ -820,6 +823,7 @@ PopupWindow {
           }
 
           CameraSlider {
+            objectName: "slider_focus_absolute"
             label: "Manual Focus"
             controlEnabled: root.getVal("focus_automatic_continuous", 1) === 0 && !root.isInactive("focus_absolute")
             disabledHint: "Disabled while autofocus is on"
@@ -848,6 +852,7 @@ PopupWindow {
           }
 
           CameraSlider {
+            objectName: "slider_exposure_time_absolute"
             label: "Exposure Time"
             controlEnabled: root.getVal("auto_exposure", 3) === 1 && !root.isInactive("exposure_time_absolute")
             disabledHint: "Disabled while auto exposure is on"
@@ -865,6 +870,7 @@ PopupWindow {
           }
 
           CameraSlider {
+            objectName: "slider_gain"
             label: "Sensor Gain"
             minimum: 0
             maximum: 255
@@ -891,6 +897,7 @@ PopupWindow {
           }
 
           CameraSlider {
+            objectName: "slider_white_balance_temperature"
             label: "Color Temperature"
             unit: "K"
             controlEnabled: root.getVal("white_balance_automatic", 1) === 0 && !root.isInactive("white_balance_temperature")
@@ -903,6 +910,7 @@ PopupWindow {
           }
 
           CameraSlider {
+            objectName: "slider_brightness"
             label: "Brightness"
             minimum: 0
             maximum: 255
@@ -912,6 +920,7 @@ PopupWindow {
           }
 
           CameraSlider {
+            objectName: "slider_contrast"
             label: "Contrast"
             minimum: 0
             maximum: 255
@@ -921,6 +930,7 @@ PopupWindow {
           }
 
           CameraSlider {
+            objectName: "slider_saturation"
             label: "Saturation"
             minimum: 0
             maximum: 255
@@ -930,6 +940,7 @@ PopupWindow {
           }
 
           CameraSlider {
+            objectName: "slider_sharpness"
             label: "Sharpness"
             minimum: 0
             maximum: 255
@@ -969,6 +980,23 @@ PopupWindow {
           Item {
             width: parent.width
             height: 8
+          }
+        }
+
+        MouseArea {
+          id: wheelInterceptor
+          objectName: "wheelInterceptor"
+          anchors.fill: sectionsCol
+          z: 10
+          acceptedButtons: Qt.NoButton
+          hoverEnabled: false
+
+          onWheel: function(wheel) {
+            wheel.accepted = true
+            // Qt Wayland touchpads deliver pixelDelta with angleDelta = 12x
+            var step = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y : (wheel.angleDelta.y / 120) * 48
+            var maxY = Math.max(0, flick.contentHeight - flick.height)
+            flick.contentY = Math.max(0, Math.min(maxY, flick.contentY - step))
           }
         }
       }
