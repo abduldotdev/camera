@@ -220,8 +220,10 @@ Item {
     cmdExecProc.currentKind = kind
     if (kind === "capture") {
       var targetDev = (!Array.isArray(item) && item.device) ? item.device : root.device
+      cmdExecProc.currentDevice = targetDev
       cmdExecProc.command = ["sh", "-c", "for i in $(seq 1 15); do if ! fuser \"$1\" >/dev/null 2>&1; then break; fi; sleep 0.05; done; shift; exec \"$@\"", "--", targetDev].concat(baseCmd)
     } else {
+      cmdExecProc.currentDevice = ""
       cmdExecProc.command = baseCmd
     }
     cmdExecProc.running = true
@@ -338,8 +340,7 @@ Item {
     }
     if (!selected) {
       root.listGeneration++
-      root.commandQueue = []
-      root.pendingCaptureCount = 0
+      root.commandQueue = root.commandQueue.filter(function (it) { return !Array.isArray(it) && it.kind === "capture" })
       root.previewActive = false
       root.previewError = ""
       root.releasePreviewedDevice()
@@ -368,8 +369,7 @@ Item {
   function switchTo(deviceObj) {
     if (!deviceObj || !deviceObj.path) return
     root.listGeneration++
-    root.commandQueue = []
-    root.pendingCaptureCount = 0
+    root.commandQueue = root.commandQueue.filter(function (it) { return !Array.isArray(it) && it.kind === "capture" })
     root.previewActive = false
     root.previewError = ""
     root.releasePreviewedDevice()
@@ -594,7 +594,6 @@ Item {
         root.devicePresent = false
         root.previewActive = false
         root.previewError = ""
-        root.previewWasActiveDuringSession = false
       }
       if (root.refreshPending && !cameractrlsListProc.running) {
         root.refreshPending = false
@@ -651,13 +650,16 @@ Item {
   Process {
     id: cmdExecProc
     property string currentKind: ""
+    property string currentDevice: ""
     onExited: function(exitCode) {
       if (cmdExecProc.currentKind === "capture") {
         root.pendingCaptureCount = Math.max(0, root.pendingCaptureCount - 1)
-        if (exitCode !== 0) {
-          root.captureBusy = true
-        } else {
-          root.captureBusy = false
+        if (cmdExecProc.currentDevice === root.device) {
+          if (exitCode !== 0) {
+            root.captureBusy = true
+          } else {
+            root.captureBusy = false
+          }
         }
       }
       if (root.commandQueue.length > 0) {
