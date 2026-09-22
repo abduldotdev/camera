@@ -13,6 +13,7 @@
 var DEFAULT_DEVICE = "/dev/video0"
 
 var PREVIEW_STATES = [
+  "idle",
   "active",
   "inactive",
   "busy",
@@ -1210,6 +1211,50 @@ function pickCameraFormat(formats, captureMode) {
   return null
 }
 
+function parseFlag(value) {
+  if (value === "1") {
+    return true
+  }
+  if (value === "0") {
+    return false
+  }
+  return null
+}
+
+function previewMayAcquire(input) {
+  if (!input || typeof input !== "object") {
+    return false
+  }
+  if (input.open !== true) {
+    return false
+  }
+  if (input.activated !== true) {
+    return false
+  }
+  if (input.devicePresent !== true) {
+    return false
+  }
+  if (input.permissionDenied === true) {
+    return false
+  }
+  if (input.captureBusy === true) {
+    return false
+  }
+  if (input.previewPaused === true) {
+    return false
+  }
+  if (typeof input.devicePath !== "string" || input.devicePath.length === 0) {
+    return false
+  }
+  if (input.previewBoundPath !== input.devicePath) {
+    return false
+  }
+  if (input.hasCameraInput !== true) {
+    return false
+  }
+  return true
+}
+
 // Export for Node.js test environment (in QML, top-level functions and vars
 // are directly accessible via import namespace).
 if (typeof module !== "undefined") {
@@ -1217,6 +1262,8 @@ if (typeof module !== "undefined") {
     DEFAULT_DEVICE: DEFAULT_DEVICE,
     CONTROLS: CONTROLS,
     PREVIEW_STATES: PREVIEW_STATES,
+    parseFlag: parseFlag,
+    previewMayAcquire: previewMayAcquire,
     PIXEL_FORMAT: PIXEL_FORMAT,
     PIXEL_FORMATS: PIXEL_FORMAT,
     PREFERRED_RESOLUTIONS: PREFERRED_RESOLUTIONS,

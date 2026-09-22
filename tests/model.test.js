@@ -888,6 +888,7 @@ assert.equal(Model.CONTROLS.pixelformat, undefined)
 // ---------------------------------------------------------------------------
 
 assert.deepEqual(Model.PREVIEW_STATES, [
+  "idle",
   "active",
   "inactive",
   "busy",
@@ -895,7 +896,7 @@ assert.deepEqual(Model.PREVIEW_STATES, [
   "disconnected",
   "unavailable"
 ])
-assert.equal(Model.PREVIEW_STATES.length, 6)
+assert.equal(Model.PREVIEW_STATES.length, 7)
 
 // ---------------------------------------------------------------------------
 // 16. PIXEL_FORMAT map and pickCameraFormat
