@@ -1,6 +1,6 @@
 # abduldotdev.camera
 
-Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like controls on Linux. Made specifically for the **Logitech MX Brio 4K Ultra HD webcam** (`046d:0944`): FOV, zoom, pan/tilt, focus, exposure, white balance, capture mode and more. Other UVC webcams may work for the standard controls, but only the MX Brio 4K is tested and supported.
+Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like controls on Linux. A camera-agnostic V4L2/UVC webcam controller for the capture devices the Linux kernel exposes, with the **Logitech MX Brio 4K Ultra HD webcam** (`046d:0944`) as the reference device: FOV, zoom, pan/tilt, focus, exposure, white balance, capture mode, and multi-camera switching.
 
 ## Screenshots
 
@@ -8,28 +8,29 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
 
 ## Features
 
-- **Bar Widget Integration**: Compact camera icon in the Omarchy bar displaying connection status (dimmed when `/dev/video0` is disconnected).
+- **Bar Widget Integration**: Compact camera icon in the Omarchy bar displaying connection status (dimmed when no capture device is discovered).
 - **Fast & Stateless**: Communicates with hardware via non-blocking asynchronous `v4l2-ctl` and `cameractrls` calls. Zero open video streams while closed; live viewfinder opens on demand strictly when the settings popup is open.
-- **In-Popup Live Viewfinder**: On-demand 16:9 live video preview stream with strict V4L2 ownership lifecycle: opens `/dev/video0` only when the popup is visible, streams at the configured capture mode, and synchronously releases the device file descriptor immediately on close, re-applying the configured driver default so external conferencing apps are never locked out. Includes an atomic capture mode interlock (pausing preview across queued format mutations until Qt reports the camera inactive) and six explicit stream states: Active, Inactive, Busy (`EBUSY`), Permission Denied (`EACCES`), Disconnected, and Unavailable. Hardware controls remain fully responsive and non-blocking during preview errors.
+- **In-Popup Live Viewfinder**: On-demand 16:9 live video preview stream with strict V4L2 ownership lifecycle: opens the selected capture device only when the popup is visible, streams at the configured capture mode, and synchronously releases the device file descriptor immediately on close, re-applying the configured driver default so external conferencing apps are never locked out. Includes an atomic capture mode interlock (pausing preview across queued format mutations until Qt reports the camera inactive) and six explicit stream states: Active, Inactive, Busy (`EBUSY`), Permission Denied (`EACCES`), Disconnected, and Unavailable. Hardware controls remain fully responsive and non-blocking during preview errors.
+- **Multi-Camera Selector**: A Camera selector sits under the header separator and above the viewfinder only when more than one capture device is discovered, labelled by card name, with the path appended when two cards share a name.
 - **Right-Edge Vertical Scrollbar**: A visible, draggable right-edge vertical scrollbar (`ScrollBar.AsNeeded`) that appears when content overflows, supporting click-and-drag handle scrubbing, track clicking, and mouse-wheel scrolling when hovered.
 - **Wheel-Safe Control Isolation**: Scrolling the mouse wheel anywhere over the popup content scrolls the settings list and never modifies any slider value. Sliders change strictly by dragging or clicking the knob/track, pressing step buttons, or via IPC commands.
-- **Categorized Settings Popup**:
-  - **Framing & Optics**: Hardware Field of View (FOV) selection (65°, 78°, 90°), Digital Zoom (100%–400% with fine 1% dragging precision), and Pan & Tilt sliders with step buttons.
-  - **Capture Mode**: Resolution (1080p, 720p, 480p) and frame rate selection (up to 60 fps) to configure Linux kernel driver capture defaults.
-  - **Focus**: Continuous autofocus toggle and manual focus distance slider (active only when autofocus is off).
-  - **Exposure**: Auto-exposure mode toggle (Aperture Priority vs Manual), manual exposure time slider (active only in manual mode), low-light compensation (dynamic framerate), and sensor gain slider.
-  - **Color & Image**: Auto white balance toggle, color temperature slider (2800K–7500K, active only when AWB is off), brightness, contrast, saturation, and sharpness sliders.
-  - **Utilities**: Anti-flicker power line frequency selection (Off, 50 Hz, 60 Hz) and backlight compensation toggle.
-- **Factory Reset**: One-click "Reset defaults" button restores all controls to factory defaults.
-- **Graceful Disconnected View**: Displays a clear "Camera Disconnected" card ("No camera at /dev/video0") and retry button when the camera is unplugged.
-- **Full IPC Support**: Control any setting via `qs ipc call abduldotdev.camera ...` from scripts, keybindings, or other shell tools.
+- **Dynamic Categorized Settings Popup**: Each settings row is shown only when the active camera exposes that control; slider min, max, and step come from the device; a section whose controls are all absent is omitted:
+  - **Framing & Optics**: Hardware Field of View (FOV) selection (65°, 78°, 90° for cameras exposing `logitech_brio_fov`), Digital Zoom, and Pan & Tilt sliders with step buttons (using limits and step reported by the device).
+  - **Capture Mode**: Resolution and frame rate selection to configure Linux kernel driver capture defaults on the selected device.
+  - **Focus**: Continuous autofocus toggle and manual focus distance slider (active only when autofocus is off, with device-reported range and step).
+  - **Exposure**: Auto-exposure mode toggle (resolving auto and manual modes dynamically from the device menu), manual exposure time slider (active only in manual mode, with device-reported range and step), low-light compensation (dynamic framerate), and sensor gain slider.
+  - **Color & Image**: Auto white balance toggle, color temperature slider (with range and step reported by the device, active only when AWB is off), brightness, contrast, saturation, and sharpness sliders.
+  - **Utilities**: Anti-flicker power line frequency selection (with menu labels from the driver, e.g. Disabled, 50 Hz, 60 Hz) and backlight compensation toggle.
+- **Device-Aware Factory Reset**: One-click "Reset defaults" button restores the controls that camera reports, each to its reported default.
+- **Graceful Disconnected View**: Displays a clear "Camera Disconnected" card ("No capture device found") and retry button when no capture device is connected.
+- **Full IPC Support**: Control any setting, query active or available devices, or switch cameras via `qs ipc call abduldotdev.camera ...` from scripts, keybindings, or other shell tools.
 
 ## Prerequisites
 
 Both packages are in the official Arch `extra` repository. The plugin never installs anything itself; install them with Omarchy's package helper before enabling the plugin:
 
-- **`v4l-utils`** (`v4l2-ctl`): **Required**. Provides direct Linux kernel V4L2 ioctl control.
-- **`cameractrls`**: **Optional**. Enables the Logitech vendor Extension Unit (XU) Field of View control (65°/78°/90°). If it is not installed, the FOV section is omitted and every other control keeps working.
+- **`v4l-utils`** (`v4l2-ctl`): **Required**. Provides direct Linux kernel V4L2 ioctl control across discovered capture devices.
+- **`cameractrls`**: **Optional**. Enables the Logitech vendor Extension Unit (XU) Field of View control (65°/78°/90°) on cameras that expose `logitech_brio_fov`. If it is not installed or the camera does not support FOV, the FOV section is omitted and every other control keeps working.
 
 ```bash
 omarchy pkg add v4l-utils cameractrls
@@ -66,18 +67,18 @@ Removal leaves nothing behind. The plugin is stateless and does not write any co
 
 ## Capture Mode (Resolution & Frame Rate)
 
-The plugin allows viewing the active capture mode and configuring the driver's default capture resolution and frame rate via `v4l2-ctl --set-fmt-video` and `--set-parm`.
+The plugin allows viewing the active capture mode and configuring the driver's default capture resolution and frame rate on the selected capture device via `v4l2-ctl --set-fmt-video` and `--set-parm`.
 
 ### Behaviour & Limitations
 
-- **Persistent Driver Default**: The configured capture mode persists in the `uvcvideo` kernel driver across process opens. It serves as the initial default for non-negotiating V4L2 tools and applications (e.g. `v4l2-ctl --stream-mmap`, `mpv av://v4l2:/dev/video0` without size arguments, or cameractrls preview). The in-popup live preview streams at the configured capture mode and automatically re-applies the driver default upon closing the popup so other applications continue to receive the user-configured resolution and frame rate.
-- **Exclusive Streaming Lock (`EBUSY`)**: Capture format and frame rate cannot be modified while any process is streaming video from `/dev/video0`. Attempting to set resolution or framerate while streaming returns `EBUSY` (`Device or resource busy`), and the popup indicates that the camera is currently in use.
+- **Persistent Driver Default**: The configured capture mode persists in the `uvcvideo` kernel driver across process opens. It serves as the initial default for non-negotiating V4L2 tools and applications (e.g. `v4l2-ctl --stream-mmap`, `mpv` on the selected capture device without size arguments, or cameractrls preview). The in-popup live preview streams at the configured capture mode and automatically re-applies the driver default upon closing the popup so other applications continue to receive the user-configured resolution and frame rate.
+- **Exclusive Streaming Lock (`EBUSY`)**: Capture format and frame rate cannot be modified while any process is streaming video from the selected capture device. Attempting to set resolution or framerate while streaming returns `EBUSY` (`Device or resource busy`), and the popup indicates that the camera is currently in use.
 - **Negotiating Applications Override Mode**: Video conferencing applications, browsers, and streaming pipelines (such as Google Meet, Zoom, OBS Studio, ffmpeg, GStreamer, and PipeWire camera portal clients) negotiate their own resolution and framerate per stream upon opening the device. The plugin's default does not constrain negotiating apps; however, the popup actively displays whatever mode the streaming app negotiated.
 - **USB Link Speed & 4K Availability**: 4K resolution (3840×2160) requires a USB 3 link. Over a USB 2.0 link (480 Mbps), the camera hardware enumerates modes up to 1920×1080 @ 30 fps or 1600×896 @ 60 fps in MJPG.
 
 ## Controls Inventory
 
-The plugin manages 18 distinct camera controls:
+The table below documents the Logitech MX Brio reference inventory across its 18 supported controls. A connected camera shows only the rows it exposes, using that camera's own min, max, step, default, and menu items:
 
 | Category | Control Name | Type | Range / Options | Default | Backend | Notes |
 |---|---|---|---|---|---|---|
@@ -101,6 +102,8 @@ The plugin manages 18 distinct camera controls:
 | | `backlight_compensation` | Integer | 0 (Off), 1 (On) | 1 | `v4l2-ctl` | Backlight shadow reduction. |
 
 ## Logi Tune Feature Support on Linux
+
+FOV is the MX Brio vendor control, and the other rows apply when the active camera exposes the matching V4L2 control.
 
 | Feature | Supported? | Status & Technical Explanation |
 |---|---|---|
@@ -158,6 +161,15 @@ qs ipc call abduldotdev.camera getCaptureMode
 # Set capture mode (resolution WxH, and optional fps)
 qs ipc call abduldotdev.camera setCaptureMode 1920x1080 30
 qs ipc call abduldotdev.camera setCaptureMode 1280x720 60
+
+# Query the active capture device path
+qs ipc call abduldotdev.camera getDevice
+
+# Switch to a discovered capture device path
+qs ipc call abduldotdev.camera setDevice /dev/video2
+
+# List discovered capture devices as a JSON array of {path, name} objects
+qs ipc call abduldotdev.camera listDevices
 ```
 
 ## Testing
@@ -165,15 +177,15 @@ qs ipc call abduldotdev.camera setCaptureMode 1280x720 60
 The plugin includes two test suites located in `tests/`:
 
 1. **Model & Parser Unit Tests** (offline):
-   Validates V4L2 and cameractrls CLI output parsing, control metadata definitions, command builders, dependency rules, and factory defaults without requiring camera hardware.
+   Validates V4L2 and cameractrls CLI output parsing, control metadata definitions, command builders, dependency rules, and factory defaults without requiring camera hardware. Also covers discovery parsing, the auto-exposure resolver, and a generic UVC fixture.
    ```bash
    node tests/model.test.js
    # or from repository root:
    node abduldotdev.camera/tests/model.test.js
    ```
 
-2. **Live Hardware Verification Test** (requires `/dev/video0`):
-   Performs live round-trip mutation and restoration tests across all 18 supported camera controls against the physical Logitech MX Brio webcam. For each control, it records the current value, sets a different valid value, asserts hardware state change, restores original settings, and verifies factory reset behaviour. It also performs a capture-mode round trip verifying video format enumeration, active mode querying, and resolution/framerate mutation and restoration (skipping cleanly if the device is busy). Skips cleanly if `/dev/video0` is absent.
+2. **Live Hardware Verification Test** (discovers connected camera):
+   Discovers the capture device, skips with exit 0 and `SKIP: no capture device found` when none is connected, and exercises only the controls that device exposes. For each exposed control, it records the current value, sets a different valid value within parsed device limits, asserts hardware state change, restores original settings, and verifies device-aware factory reset behaviour. It also performs a capture-mode round trip against the discovered device verifying video format enumeration, active mode querying, and resolution/framerate mutation and restoration (skipping cleanly if the device is busy).
    ```bash
    node tests/hardware.test.js
    # or from repository root:

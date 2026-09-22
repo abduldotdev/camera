@@ -1,5 +1,6 @@
-// Model.js — Pure JavaScript camera model, control metadata, and CLI command
-// builders for Logitech MX Brio and standard UVC video devices.
+// Model.js — Pure JavaScript camera-agnostic V4L2 model, device discovery,
+// control metadata, and CLI command builders. The control catalog remains
+// the Logitech MX Brio reference device.
 //
 // Dual-environment module: loadable directly in Quickshell QML via:
 //   import "Model.js" as Model
@@ -196,6 +197,227 @@ var CONTROLS = {
     category: "optics",
     backend: "cameractrls"
   }
+}
+
+// Command builder: discover connected video capture devices via v4l2-ctl
+function buildV4l2DevicesCommand() {
+  var script = [
+    "list=$(v4l2-ctl --list-devices 2>/dev/null || true)",
+    'printf "%s\\n" "$list" | awk \'',
+    "  /^[^[:space:]]/ {",
+    "    card = $0",
+    '    bus = ""',
+    "    if (match($0, /[[:space:]]*\\([^)]*\\):[[:space:]]*$/)) {",
+    "      card = substr($0, 1, RSTART - 1)",
+    "      bus = substr($0, RSTART, RLENGTH)",
+    '      sub(/^[[:space:]]*\\(/, "", bus)',
+    '      sub(/\\):[[:space:]]*$/, "", bus)',
+    "    } else {",
+    '      sub(/:[[:space:]]*$/, "", card)',
+    "    }",
+    "    next",
+    "  }",
+    "  $1 ~ /^\\/dev\\/video[0-9]+$/ {",
+    '    print card "\\034" bus "\\034" $1',
+    "  }",
+    '\' | while IFS="$(printf \'\\034\')" read -r card bus path; do',
+    '  info=$(v4l2-ctl -d "$path" --info 2>/dev/null) || continue',
+    "  caps=$(printf '%s\\n' \"$info\" | awk '",
+    "    /^[[:space:]]*Device Caps[[:space:]]*:/ {",
+    "      on = 1",
+    "      line = $0",
+    '      sub(/^[[:space:]]*Device Caps[[:space:]]*:[[:space:]]*/, "", line)',
+    '      printf "%s", line',
+    "      next",
+    "    }",
+    "    on && /^[[:space:]]/ {",
+    '      gsub(/^[[:space:]]+/, "")',
+    '      printf " %s", $0',
+    "      next",
+    "    }",
+    "    on { exit }",
+    "  ')",
+    "  printf 'card=%s\\nbus=%s\\npath=%s\\ncaps=%s\\n---\\n' \"$card\" \"$bus\" \"$path\" \"$caps\"",
+    "done"
+  ].join("\n")
+
+  return ["sh", "-c", script]
+}
+
+// Command builder: query device driver and hardware info
+function buildV4l2InfoCommand(device) {
+  return ["v4l2-ctl", "-d", device || DEFAULT_DEVICE, "--info"]
+}
+
+// Parse stdout from buildV4l2DevicesCommand discovery script.
+// Filters only nodes whose Device Caps report "Video Capture" (excluding metadata nodes).
+// Returns array of { path, name, bus, card } objects in encounter order.
+function parseV4l2Devices(rawText) {
+  if (!rawText || typeof rawText !== "string") return []
+
+  var devices = []
+  var seenPaths = {}
+  var lines = rawText.split(/\r?\n/)
+  var current = {}
+
+  function processRecord(rec) {
+    if (rec.path && /^\/dev\/video[0-9]+$/.test(rec.path) &&
+        rec.caps && rec.caps.indexOf("Video Capture") !== -1 &&
+        !seenPaths[rec.path]) {
+      seenPaths[rec.path] = true
+      var card = rec.card || ""
+      devices.push({
+        path: rec.path,
+        name: card,
+        bus: rec.bus || "",
+        card: card
+      })
+    }
+  }
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+    if (line === "---") {
+      processRecord(current)
+      current = {}
+      continue
+    }
+
+    var eqIdx = line.indexOf("=")
+    if (eqIdx !== -1) {
+      var key = line.substring(0, eqIdx)
+      var val = line.substring(eqIdx + 1)
+      current[key] = val
+    }
+  }
+  processRecord(current)
+
+  return devices
+}
+
+// Selects active capture device from list. If previousPath matches a known device,
+// keeps it. Otherwise returns first device, or null if list is empty.
+function selectActiveDevice(devices, previousPath) {
+  if (!devices || !devices.length) return null
+
+  if (previousPath) {
+    for (var i = 0; i < devices.length; i++) {
+      if (devices[i].path === previousPath) {
+        return devices[i]
+      }
+    }
+  }
+
+  return devices[0]
+}
+
+// Formats options for CameraSegmented device selector:
+// [{ value: path, label: card or card + " · " + path }]
+function deviceSelectorOptions(devices) {
+  if (!devices || !devices.length) return []
+
+  var cardCounts = {}
+  for (var i = 0; i < devices.length; i++) {
+    var c = devices[i].card || devices[i].name || ""
+    cardCounts[c] = (cardCounts[c] || 0) + 1
+  }
+
+  var options = []
+  for (var j = 0; j < devices.length; j++) {
+    var d = devices[j]
+    var cardName = d.card || d.name || ""
+    var label = cardName
+    if (cardCounts[cardName] > 1) {
+      label = cardName + " · " + d.path
+    }
+    options.push({
+      value: d.path,
+      label: label
+    })
+  }
+
+  return options
+}
+
+// Resolves auto-exposure manual and auto integer values from menu items:
+// Returns { manual: number, auto: number }
+function resolveAutoExposure(menuItems) {
+  var manual = undefined
+  var auto = undefined
+
+  var items = (menuItems && Array.isArray(menuItems)) ? menuItems : []
+
+  // 1. Find manual
+  for (var i = 0; i < items.length; i++) {
+    var label = String(items[i].label || "")
+    if (/manual/i.test(label)) {
+      manual = Number(items[i].value)
+      break
+    }
+  }
+  if (manual === undefined) {
+    for (var j = 0; j < items.length; j++) {
+      if (Number(items[j].value) === 1) {
+        manual = 1
+        break
+      }
+    }
+  }
+  if (manual === undefined) {
+    manual = 1
+  }
+
+  // 2. Find auto
+  for (var k = 0; k < items.length; k++) {
+    var lblAperture = String(items[k].label || "")
+    if (/aperture priority/i.test(lblAperture)) {
+      auto = Number(items[k].value)
+      break
+    }
+  }
+  if (auto === undefined) {
+    for (var m = 0; m < items.length; m++) {
+      var lblAuto = String(items[m].label || "")
+      if (/auto/i.test(lblAuto) && !/manual/i.test(lblAuto)) {
+        auto = Number(items[m].value)
+        break
+      }
+    }
+  }
+  if (auto === undefined) {
+    for (var n = 0; n < items.length; n++) {
+      var valN = Number(items[n].value)
+      if (valN !== manual) {
+        auto = valN
+        break
+      }
+    }
+  }
+  if (auto === undefined) {
+    auto = (manual !== 3) ? 3 : manual
+  }
+
+  return { manual: manual, auto: auto }
+}
+
+// Formats power line frequency options from reported menuItems or fallback
+function powerLineOptions(menuItems) {
+  if (menuItems && Array.isArray(menuItems) && menuItems.length > 0) {
+    var res = []
+    for (var p = 0; p < menuItems.length; p++) {
+      var item = menuItems[p]
+      res.push({
+        value: String(item.value),
+        label: String(item.label)
+      })
+    }
+    return res
+  }
+  return [
+    { value: "0", label: "Off" },
+    { value: "1", label: "50 Hz" },
+    { value: "2", label: "60 Hz" }
+  ]
 }
 
 // Parse stdout from `v4l2-ctl -d <dev> --list-ctrls` or `--list-ctrls-menus`.
@@ -738,55 +960,147 @@ function getDefaults() {
 }
 
 // Builds CLI commands required to restore factory defaults for all controls.
-// Returns an ordered array of command arrays:
-// 1. Switch parent controls to manual so dependent controls become active.
-// 2. Set dependent controls (white_balance_temperature, exposure_time_absolute, focus_absolute) to defaults.
-// 3. Set all remaining standard V4L2 controls to defaults (including parent controls back to auto defaults).
-// 4. Reset cameractrls vendor FOV to default (65).
-function buildResetCommands(device) {
+// If controls is omitted/null, restores Logitech MX Brio reference catalog defaults.
+// If controls is provided as an object/map, resets only the controls present in that map.
+function buildResetCommands(device, controls) {
   var dev = device || DEFAULT_DEVICE
 
-  // 1. Switch three parent controls to manual
-  var parentManualCmd = [
-    "v4l2-ctl", "-d", dev, "--set-ctrl",
-    "white_balance_automatic=0,auto_exposure=1,focus_automatic_continuous=0"
-  ]
+  if (controls === undefined || controls === null) {
+    // 1. Switch three parent controls to manual
+    var parentManualCmd = [
+      "v4l2-ctl", "-d", dev, "--set-ctrl",
+      "white_balance_automatic=0,auto_exposure=1,focus_automatic_continuous=0"
+    ]
 
-  // 2. Set three dependent controls to their defaults while parents are manual
-  var dependentDefaults = [
-    "white_balance_temperature=" + CONTROLS.white_balance_temperature.defaultVal,
-    "exposure_time_absolute=" + CONTROLS.exposure_time_absolute.defaultVal,
-    "focus_absolute=" + CONTROLS.focus_absolute.defaultVal
-  ]
-  var dependentCmd = [
-    "v4l2-ctl", "-d", dev, "--set-ctrl", dependentDefaults.join(",")
-  ]
+    // 2. Set three dependent controls to their defaults while parents are manual
+    var dependentDefaults = [
+      "white_balance_temperature=" + CONTROLS.white_balance_temperature.defaultVal,
+      "exposure_time_absolute=" + CONTROLS.exposure_time_absolute.defaultVal,
+      "focus_absolute=" + CONTROLS.focus_absolute.defaultVal
+    ]
+    var dependentCmd = [
+      "v4l2-ctl", "-d", dev, "--set-ctrl", dependentDefaults.join(",")
+    ]
 
-  // 3. Set remaining standard controls to defaults, including parents back to auto
-  var dependentNames = {
+    // 3. Set remaining standard controls to defaults, including parents back to auto
+    var dependentNames = {
+      white_balance_temperature: true,
+      exposure_time_absolute: true,
+      focus_absolute: true
+    }
+    var remainingPairs = []
+    for (var name in CONTROLS) {
+      if (CONTROLS.hasOwnProperty(name)) {
+        var ctrl = CONTROLS[name]
+        if (ctrl.backend !== "cameractrls" && !dependentNames[name]) {
+          remainingPairs.push(name + "=" + ctrl.defaultVal)
+        }
+      }
+    }
+    var remainingCmd = [
+      "v4l2-ctl", "-d", dev, "--set-ctrl", remainingPairs.join(",")
+    ]
+
+    // 4. Reset cameractrls vendor FOV
+    var fovCmd = [
+      "cameractrls", "-d", dev, "-c", "logitech_brio_fov=" + CONTROLS.logitech_brio_fov.defaultVal
+    ]
+
+    return [parentManualCmd, dependentCmd, remainingCmd, fovCmd]
+  }
+
+  var cmds = []
+
+  function getCtrlDefault(c) {
+    if (!c) return undefined
+    if (c.defaultVal !== undefined) return c.defaultVal
+    if (c.default !== undefined) return c.default
+    return undefined
+  }
+
+  function hasCtrl(n) {
+    return Object.prototype.hasOwnProperty.call(controls, n) && controls[n] !== undefined && controls[n] !== null
+  }
+
+  // Dependency pairs:
+  // white_balance_temperature forces white_balance_automatic=0
+  // exposure_time_absolute forces auto_exposure=<resolveAutoExposure(menuItems or options).manual>
+  // focus_absolute forces focus_automatic_continuous=0
+  var hasWb = hasCtrl("white_balance_temperature") && hasCtrl("white_balance_automatic") &&
+              getCtrlDefault(controls.white_balance_temperature) !== undefined
+  var hasAe = hasCtrl("exposure_time_absolute") && hasCtrl("auto_exposure") &&
+              getCtrlDefault(controls.exposure_time_absolute) !== undefined
+  var hasFocus = hasCtrl("focus_absolute") && hasCtrl("focus_automatic_continuous") &&
+                 getCtrlDefault(controls.focus_absolute) !== undefined
+
+  // Command 1: parent assignments
+  var parentPairs = []
+  if (hasWb) {
+    parentPairs.push("white_balance_automatic=0")
+  }
+  if (hasAe) {
+    var aeCtrl = controls.auto_exposure
+    var aeItems = (aeCtrl && (aeCtrl.menuItems || aeCtrl.options)) || []
+    var aeManual = resolveAutoExposure(aeItems).manual
+    parentPairs.push("auto_exposure=" + aeManual)
+  }
+  if (hasFocus) {
+    parentPairs.push("focus_automatic_continuous=0")
+  }
+  if (parentPairs.length > 0) {
+    cmds.push(["v4l2-ctl", "-d", dev, "--set-ctrl", parentPairs.join(",")])
+  }
+
+  // Command 2: dependent controls
+  var depPairs = []
+  var depOrder = ["white_balance_temperature", "exposure_time_absolute", "focus_absolute"]
+  for (var d = 0; d < depOrder.length; d++) {
+    var depName = depOrder[d]
+    if (hasCtrl(depName)) {
+      var depDef = getCtrlDefault(controls[depName])
+      if (depDef !== undefined) {
+        depPairs.push(depName + "=" + depDef)
+      }
+    }
+  }
+  if (depPairs.length > 0) {
+    cmds.push(["v4l2-ctl", "-d", dev, "--set-ctrl", depPairs.join(",")])
+  }
+
+  // Command 3: remaining controls
+  var depMap = {
     white_balance_temperature: true,
     exposure_time_absolute: true,
     focus_absolute: true
   }
-  var remainingPairs = []
-  for (var name in CONTROLS) {
-    if (CONTROLS.hasOwnProperty(name)) {
-      var ctrl = CONTROLS[name]
-      if (ctrl.backend !== "cameractrls" && !dependentNames[name]) {
-        remainingPairs.push(name + "=" + ctrl.defaultVal)
+  var remPairs = []
+  for (var cName in controls) {
+    if (Object.prototype.hasOwnProperty.call(controls, cName)) {
+      if (depMap[cName]) continue
+      if (cName === "logitech_brio_fov") continue
+      var cObj = controls[cName]
+      if (cObj && cObj.backend === "cameractrls") continue
+      var cDef = getCtrlDefault(cObj)
+      if (cDef !== undefined) {
+        remPairs.push(cName + "=" + cDef)
       }
     }
   }
-  var remainingCmd = [
-    "v4l2-ctl", "-d", dev, "--set-ctrl", remainingPairs.join(",")
-  ]
+  if (remPairs.length > 0) {
+    cmds.push(["v4l2-ctl", "-d", dev, "--set-ctrl", remPairs.join(",")])
+  }
 
-  // 4. Reset cameractrls vendor FOV
-  var fovCmd = [
-    "cameractrls", "-d", dev, "-c", "logitech_brio_fov=" + CONTROLS.logitech_brio_fov.defaultVal
-  ]
+  // Command 4: logitech_brio_fov
+  if (hasCtrl("logitech_brio_fov")) {
+    var fovObj = controls.logitech_brio_fov
+    var fovVal = getCtrlDefault(fovObj)
+    if (fovVal === undefined) {
+      fovVal = 65
+    }
+    cmds.push(["cameractrls", "-d", dev, "-c", "logitech_brio_fov=" + fovVal])
+  }
 
-  return [parentManualCmd, dependentCmd, remainingCmd, fovCmd]
+  return cmds
 }
 
 // Evaluates whether a control is currently active (editable) based on its
@@ -908,6 +1222,13 @@ if (typeof module !== "undefined") {
     PREFERRED_RESOLUTIONS: PREFERRED_RESOLUTIONS,
     PREFERRED_FPS: PREFERRED_FPS,
     RESOLUTION_TAGS: RESOLUTION_TAGS,
+    buildV4l2DevicesCommand: buildV4l2DevicesCommand,
+    buildV4l2InfoCommand: buildV4l2InfoCommand,
+    parseV4l2Devices: parseV4l2Devices,
+    selectActiveDevice: selectActiveDevice,
+    deviceSelectorOptions: deviceSelectorOptions,
+    resolveAutoExposure: resolveAutoExposure,
+    powerLineOptions: powerLineOptions,
     parseV4l2Ctrls: parseV4l2Ctrls,
     parseCameractrls: parseCameractrls,
     parseV4l2Formats: parseV4l2Formats,

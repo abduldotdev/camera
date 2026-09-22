@@ -3,13 +3,19 @@ const cp = require("node:child_process")
 const fs = require("node:fs")
 const Model = require("../Model.js")
 
-const device = Model.DEFAULT_DEVICE || "/dev/video0"
-
-// Skip cleanly if /dev/video0 is missing
-if (!fs.existsSync(device)) {
-  console.log(`SKIP: device ${device} not found`)
+const devCmd = Model.buildV4l2DevicesCommand()
+const devOut = cp.execFileSync(devCmd[0], devCmd.slice(1), {
+  encoding: "utf8",
+  stdio: ["pipe", "pipe", "pipe"]
+})
+const discoveredDevices = Model.parseV4l2Devices(devOut)
+const selected = Model.selectActiveDevice(discoveredDevices, null)
+if (!selected) {
+  console.log("SKIP: no capture device found")
   process.exit(0)
 }
+const device = selected.path
+const deviceCard = selected.card || selected.name || "Camera"
 
 function runCmd(cmd) {
   return cp.execFileSync(cmd[0], cmd.slice(1), {
@@ -49,76 +55,98 @@ function getCurrentValue(name) {
   return v4l2[name] ? v4l2[name].value : undefined
 }
 
-function pickDifferentValue(ctrl, currentVal) {
-  if (ctrl.type === "bool") {
+function pickDifferentValue(parsedCtrl, currentVal) {
+  if (parsedCtrl.type === "bool") {
     return currentVal ? 0 : 1
   }
-  if (ctrl.type === "menu") {
-    if (ctrl.name === "logitech_brio_fov") {
-      const opts = ctrl.options || [65, 78, 90]
+  if (parsedCtrl.type === "menu") {
+    if (parsedCtrl.name === "logitech_brio_fov") {
+      const opts = parsedCtrl.options || [65, 78, 90]
       return opts.find(o => o !== currentVal) ?? (currentVal === 65 ? 78 : 65)
     }
-    const opts = (ctrl.options || []).map(o => (typeof o === "object" ? o.value : o))
+    const items = parsedCtrl.menuItems || parsedCtrl.options || []
+    const opts = items.map(o => (typeof o === "object" ? o.value : o))
     const diff = opts.find(o => o !== currentVal)
     return diff !== undefined ? diff : (currentVal === opts[0] ? opts[1] : opts[0])
   }
-  if (ctrl.type === "int") {
-    const step = ctrl.step || 1
-    if (ctrl.name === "white_balance_temperature") {
-      return currentVal <= 7000 ? currentVal + 200 : currentVal - 200
+  if (parsedCtrl.type === "int") {
+    const min = parsedCtrl.min !== undefined ? parsedCtrl.min : 0
+    const max = parsedCtrl.max !== undefined ? parsedCtrl.max : 255
+    const step = (parsedCtrl.step !== undefined && parsedCtrl.step > 0) ? parsedCtrl.step : 1
+
+    let candidate = undefined
+    if (parsedCtrl.name === "white_balance_temperature") {
+      candidate = currentVal + 200 <= max ? currentVal + 200 : currentVal - 200
+    } else if (parsedCtrl.name === "exposure_time_absolute") {
+      candidate = currentVal + 100 <= max ? currentVal + 100 : currentVal - 100
+    } else if (parsedCtrl.name === "focus_absolute") {
+      candidate = currentVal + 20 <= max ? currentVal + 20 : currentVal - 20
+    } else if (parsedCtrl.name === "zoom_absolute") {
+      candidate = currentVal + 20 <= max ? currentVal + 20 : currentVal - 20
+    } else if (parsedCtrl.name === "pan_absolute" || parsedCtrl.name === "tilt_absolute") {
+      candidate = currentVal + 3600 <= max ? currentVal + 3600 : currentVal - 3600
+    } else if (parsedCtrl.name === "gain") {
+      candidate = currentVal + 10 <= max ? currentVal + 10 : currentVal - 10
     }
-    if (ctrl.name === "exposure_time_absolute") {
-      return currentVal <= 1900 ? currentVal + 100 : currentVal - 100
+
+    if (candidate !== undefined && candidate >= min && candidate <= max && candidate !== currentVal) {
+      return candidate
     }
-    if (ctrl.name === "focus_absolute") {
-      return currentVal <= 230 ? currentVal + 20 : currentVal - 20
-    }
-    if (ctrl.name === "zoom_absolute") {
-      return currentVal <= 380 ? currentVal + 20 : currentVal - 20
-    }
-    if (ctrl.name === "pan_absolute" || ctrl.name === "tilt_absolute") {
-      return currentVal <= 68400 ? currentVal + 3600 : currentVal - 3600
-    }
-    if (ctrl.name === "gain") {
-      return currentVal <= 240 ? currentVal + 10 : currentVal - 10
-    }
-    if (currentVal + step <= ctrl.max) {
+
+    if (currentVal + step <= max) {
       return currentVal + step
-    } else {
+    } else if (currentVal - step >= min) {
       return currentVal - step
     }
+    return currentVal
   }
   return currentVal
 }
 
-// Snapshot original values for all controls
-const originalValues = {}
+// Query device once and snapshot original values for present controls
 const initialV4l2 = getV4l2Controls()
-for (const name of Object.keys(Model.CONTROLS)) {
-  if (name === "logitech_brio_fov") {
-    originalValues[name] = getFovControl()
-  } else {
-    originalValues[name] = initialV4l2[name] ? initialV4l2[name].value : Model.CONTROLS[name].defaultVal
+const initialFov = getFovControl()
+const originalValues = {}
+for (const name of Object.keys(initialV4l2)) {
+  if (initialV4l2[name] && initialV4l2[name].value !== undefined) {
+    originalValues[name] = initialV4l2[name].value
   }
+}
+if (initialFov !== undefined) {
+  originalValues.logitech_brio_fov = initialFov
 }
 
 // Snapshot original capture mode
 const initialCaptureMode = Model.parseV4l2CaptureMode(runCmd(Model.buildV4l2ListCommand(device)))
 
 try {
-  console.log("=== Logitech MX Brio Hardware Control Verification (/dev/video0) ===")
+  console.log(`=== ${deviceCard} Hardware Control Verification (${device}) ===`)
+
 
   for (const name of Object.keys(Model.CONTROLS)) {
     const ctrl = Model.CONTROLS[name]
+    if (name === "logitech_brio_fov") {
+      if (initialFov === undefined) {
+        console.log("SKIP: logitech_brio_fov not exposed")
+        continue
+      }
+    } else {
+      if (!initialV4l2[name]) {
+        console.log(`SKIP: ${name} not exposed`)
+        continue
+      }
+    }
+
     const isDependent = !!ctrl.dependsOn
     let parentOrig = undefined
 
     // For dependent controls, switch parent control to manual first
-    if (isDependent) {
+    if (isDependent && initialV4l2[ctrl.dependsOn]) {
       parentOrig = getCurrentValue(ctrl.dependsOn)
       let manualVal = 0
       if (ctrl.dependsOn === "auto_exposure") {
-        manualVal = 1
+        const aeItems = initialV4l2.auto_exposure ? initialV4l2.auto_exposure.menuItems : []
+        manualVal = Model.resolveAutoExposure(aeItems).manual
       } else if (ctrl.dependsOn === "white_balance_automatic" || ctrl.dependsOn === "focus_automatic_continuous") {
         manualVal = 0
       }
@@ -126,17 +154,13 @@ try {
     }
 
     const beforeVal = getCurrentValue(name)
-    if (beforeVal === undefined && name === "logitech_brio_fov") {
-      if (!hasCameractrls()) {
-        console.log("SKIP: logitech_brio_fov skipped because cameractrls binary is not installed")
-      } else {
-        console.log("SKIP: logitech_brio_fov absent from cameractrls output on this device")
-      }
-      continue
-    }
     assert.notEqual(beforeVal, undefined, `Failed to query current value for ${name}`)
+    assert.equal(typeof beforeVal, "number", `Control ${name} value must be a number`)
 
-    const targetVal = pickDifferentValue(ctrl, beforeVal)
+    const parsedCtrl = name === "logitech_brio_fov"
+      ? { name: "logitech_brio_fov", type: "menu", options: [65, 78, 90] }
+      : initialV4l2[name]
+    const targetVal = pickDifferentValue(parsedCtrl, beforeVal)
     assert.notEqual(targetVal, beforeVal, `Could not pick a different value for ${name} from ${beforeVal}`)
 
     // Set new value using plugin's builder
@@ -160,7 +184,7 @@ try {
     assert.equal(restoredVal, beforeVal, `Control ${name} did not restore to ${beforeVal} (got ${restoredVal})`)
 
     // Restore parent control if dependent
-    if (isDependent && parentOrig !== undefined) {
+    if (isDependent && parentOrig !== undefined && initialV4l2[ctrl.dependsOn]) {
       runCmd(Model.buildV4l2SetCommand(device, ctrl.dependsOn, parentOrig))
       const parentRestored = getCurrentValue(ctrl.dependsOn)
       assert.equal(parentRestored, parentOrig, `Parent control ${ctrl.dependsOn} did not restore to ${parentOrig}`)
@@ -200,22 +224,32 @@ try {
     }
   }
 
-  // Run Model.buildResetCommands() once and assert every control equals its default afterwards
+  // Run Model.buildResetCommands(device, map) and assert every present control equals its defaultVal afterwards
   console.log("\n=== Testing Factory Reset Commands ===")
-  const resetCmds = Model.buildResetCommands(device)
+  const resetMap = Object.assign({}, initialV4l2)
+  if (initialFov !== undefined) {
+    resetMap.logitech_brio_fov = {
+      name: "logitech_brio_fov",
+      backend: "cameractrls",
+      defaultVal: 65,
+      default: 65
+    }
+  }
+  const resetCmds = Model.buildResetCommands(device, resetMap)
   for (const cmd of resetCmds) {
     runCmd(cmd)
   }
 
   const postResetV4l2 = getV4l2Controls()
   const postResetFov = getFovControl()
-  const defaults = Model.getDefaults()
-  for (const name of Object.keys(Model.CONTROLS)) {
-    if (name === "logitech_brio_fov" && postResetFov === undefined) {
-      continue
+  for (const name of Object.keys(resetMap)) {
+    if (name === "logitech_brio_fov") {
+      assert.equal(postResetFov, 65, `Control logitech_brio_fov did not equal default 65 after reset (got ${postResetFov})`)
+    } else {
+      const expectedDef = resetMap[name].defaultVal !== undefined ? resetMap[name].defaultVal : resetMap[name].default
+      const val = postResetV4l2[name] ? postResetV4l2[name].value : undefined
+      assert.equal(val, expectedDef, `Control ${name} did not equal default ${expectedDef} after reset (got ${val})`)
     }
-    const val = name === "logitech_brio_fov" ? postResetFov : postResetV4l2[name]?.value
-    assert.equal(val, defaults[name], `Control ${name} did not equal default ${defaults[name]} after reset (got ${val})`)
   }
   console.log("Reset check: every control verified at factory default value")
 
@@ -262,14 +296,11 @@ try {
   assert.ok(parsedCaptureMode.fps > 0, "parseV4l2CaptureMode must yield positive fps")
 
   const combinedCtrls = Model.parseV4l2Ctrls(listCombinedOut)
-  const standardCtrls = Object.keys(Model.CONTROLS).filter(name => Model.CONTROLS[name].backend !== "cameractrls")
-  assert.equal(standardCtrls.length, 17, `Expected 17 standard V4L2 controls, got ${standardCtrls.length}`)
-  for (const name of standardCtrls) {
-    assert.ok(combinedCtrls[name] !== undefined, `Control ${name} missing from parseV4l2Ctrls on combined list command output`)
+  for (const name of Object.keys(combinedCtrls)) {
     assert.equal(typeof combinedCtrls[name].value, "number", `Control ${name} value must be a number`)
   }
   console.log(`Current capture mode: ${parsedCaptureMode.width}x${parsedCaptureMode.height}@${parsedCaptureMode.fps} ${parsedCaptureMode.pixelformat}`)
-  console.log("Combined list check: all 17 standard controls parsed without regression alongside capture mode")
+  console.log(`Combined list check: ${Object.keys(combinedCtrls).length} control(s) parsed without regression alongside capture mode`)
 
   // (c) record current capture mode, choose a different enumerated size/fps via pickCaptureMode
   //     (e.g. the first preferred size that differs from current, at a different fps if available),
@@ -383,50 +414,67 @@ try {
 
   // === Testing Control Adjustment While Streaming (Non-blocking Controls Contract) ===
   console.log("\n=== Testing Control Adjustment While Streaming ===")
-  const streamProc = cp.spawn("v4l2-ctl", ["-d", device, "--stream-mmap", "--stream-count=100"], {
-    stdio: "ignore"
-  })
-  try {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150)
-
-    const bBefore = getCurrentValue("brightness")
-    const bTarget = bBefore <= 240 ? bBefore + 5 : bBefore - 5
-    runCmd(Model.buildV4l2SetCommand(device, "brightness", bTarget))
-    const bAfter = getCurrentValue("brightness")
-    assert.equal(bAfter, bTarget, `Brightness control failed while streaming (got ${bAfter}, expected ${bTarget})`)
-
-    runCmd(Model.buildV4l2SetCommand(device, "brightness", bBefore))
-    const bRestored = getCurrentValue("brightness")
-    assert.equal(bRestored, bBefore, `Brightness restore failed while streaming (got ${bRestored}, expected ${bBefore})`)
-    console.log(`Verified control adjustment while streaming holds /dev/video0: brightness ${bBefore} -> ${bTarget} -> ${bRestored}`)
-  } finally {
+  if (!initialV4l2.brightness) {
+    console.log("SKIP: brightness not exposed, skipping streaming test")
+  } else {
+    const streamProc = cp.spawn("v4l2-ctl", ["-d", device, "--stream-mmap", "--stream-count=100"], {
+      stdio: "ignore"
+    })
     try {
-      streamProc.kill("SIGKILL")
-    } catch {}
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150)
+
+      const bBefore = getCurrentValue("brightness")
+      const bTarget = pickDifferentValue(initialV4l2.brightness, bBefore)
+      runCmd(Model.buildV4l2SetCommand(device, "brightness", bTarget))
+      const bAfter = getCurrentValue("brightness")
+      assert.equal(bAfter, bTarget, `Brightness control failed while streaming (got ${bAfter}, expected ${bTarget})`)
+
+      runCmd(Model.buildV4l2SetCommand(device, "brightness", bBefore))
+      const bRestored = getCurrentValue("brightness")
+      assert.equal(bRestored, bBefore, `Brightness restore failed while streaming (got ${bRestored}, expected ${bBefore})`)
+      console.log(`Verified control adjustment while streaming holds ${device}: brightness ${bBefore} -> ${bTarget} -> ${bRestored}`)
+    } finally {
+      try {
+        streamProc.kill("SIGKILL")
+      } catch {}
+    }
   }
 
 } finally {
   // Always restore original values even if an assertion fails
   console.log("\nRestoring camera to original state...")
   const restorationErrors = []
-  for (const name of Object.keys(Model.CONTROLS)) {
+  for (const name of Object.keys(originalValues)) {
     const origVal = originalValues[name]
     if (origVal === undefined) continue
     try {
       if (name === "logitech_brio_fov") {
         runCmd(Model.buildFovSetCommand(device, origVal))
       } else if (name === "white_balance_temperature") {
-        runCmd(Model.buildV4l2SetCommand(device, "white_balance_automatic", 0))
-        runCmd(Model.buildV4l2SetCommand(device, "white_balance_temperature", origVal))
-        runCmd(Model.buildV4l2SetCommand(device, "white_balance_automatic", originalValues.white_balance_automatic ?? 1))
+        if (originalValues.white_balance_automatic !== undefined) {
+          runCmd(Model.buildV4l2SetCommand(device, "white_balance_automatic", 0))
+          runCmd(Model.buildV4l2SetCommand(device, "white_balance_temperature", origVal))
+          runCmd(Model.buildV4l2SetCommand(device, "white_balance_automatic", originalValues.white_balance_automatic))
+        } else {
+          runCmd(Model.buildV4l2SetCommand(device, "white_balance_temperature", origVal))
+        }
       } else if (name === "exposure_time_absolute") {
-        runCmd(Model.buildV4l2SetCommand(device, "auto_exposure", 1))
-        runCmd(Model.buildV4l2SetCommand(device, "exposure_time_absolute", origVal))
-        runCmd(Model.buildV4l2SetCommand(device, "auto_exposure", originalValues.auto_exposure ?? 3))
+        if (originalValues.auto_exposure !== undefined) {
+          const aeManual = Model.resolveAutoExposure(initialV4l2.auto_exposure ? initialV4l2.auto_exposure.menuItems : []).manual
+          runCmd(Model.buildV4l2SetCommand(device, "auto_exposure", aeManual))
+          runCmd(Model.buildV4l2SetCommand(device, "exposure_time_absolute", origVal))
+          runCmd(Model.buildV4l2SetCommand(device, "auto_exposure", originalValues.auto_exposure))
+        } else {
+          runCmd(Model.buildV4l2SetCommand(device, "exposure_time_absolute", origVal))
+        }
       } else if (name === "focus_absolute") {
-        runCmd(Model.buildV4l2SetCommand(device, "focus_automatic_continuous", 0))
-        runCmd(Model.buildV4l2SetCommand(device, "focus_absolute", origVal))
-        runCmd(Model.buildV4l2SetCommand(device, "focus_automatic_continuous", originalValues.focus_automatic_continuous ?? 1))
+        if (originalValues.focus_automatic_continuous !== undefined) {
+          runCmd(Model.buildV4l2SetCommand(device, "focus_automatic_continuous", 0))
+          runCmd(Model.buildV4l2SetCommand(device, "focus_absolute", origVal))
+          runCmd(Model.buildV4l2SetCommand(device, "focus_automatic_continuous", originalValues.focus_automatic_continuous))
+        } else {
+          runCmd(Model.buildV4l2SetCommand(device, "focus_absolute", origVal))
+        }
       } else {
         runCmd(Model.buildV4l2SetCommand(device, name, origVal))
       }

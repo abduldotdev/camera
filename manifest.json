@@ -5,7 +5,7 @@
   "version": "1.1.0",
   "author": "abduldotdev",
   "license": "MIT",
-  "description": "Logi Tune-like controls for the Logitech MX Brio 4K webcam",
+  "description": "V4L2/UVC webcam controls for any camera. Discovers capture devices, shows only controls the camera exposes, and switches cameras. Logitech MX Brio is the reference device.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Camera",
-    "description": "Logi Tune-like controls for the Logitech MX Brio 4K webcam",
+    "description": "V4L2/UVC webcam controls for any camera. Discovers capture devices, shows only controls the camera exposes, and switches cameras. Logitech MX Brio is the reference device.",
     "category": "Media",
     "allowMultiple": false,
     "defaultSection": "right"
