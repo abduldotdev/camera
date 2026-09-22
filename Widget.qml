@@ -183,20 +183,26 @@ Item {
     root.setCaptureMode(w, h, f)
   }
 
+  function queueCaptureRestore(device, mode) {
+    if (typeof device !== "string" || device === "") return
+    if (!mode || mode.width === undefined || mode.height === undefined) return
+    var targetMode = {
+      width: mode.width,
+      height: mode.height,
+      pixelformat: mode.pixelformat || "MJPG",
+      fps: mode.fps !== undefined ? mode.fps : 30
+    }
+    var cmd = (typeof Model !== "undefined" && typeof Model.buildV4l2SetCaptureModeCommand === "function")
+      ? Model.buildV4l2SetCaptureModeCommand(device, targetMode)
+      : ["v4l2-ctl", "-d", device, "--set-fmt-video=width=" + targetMode.width + ",height=" + targetMode.height + ",pixelformat=" + targetMode.pixelformat, "--set-parm=" + targetMode.fps]
+    root.pendingCaptureCount++
+    queueCommand(cmd, "capture", device)
+  }
+
   function reapplyCaptureMode() {
     if (!root.devicePresent || root.permissionDenied) return
     if (!root.captureMode || root.captureMode.width === undefined || root.captureMode.height === undefined) return
-    var mode = {
-      width: root.captureMode.width,
-      height: root.captureMode.height,
-      pixelformat: root.captureMode.pixelformat || "MJPG",
-      fps: root.captureMode.fps !== undefined ? root.captureMode.fps : 30
-    }
-    var cmd = (typeof Model !== "undefined" && typeof Model.buildV4l2SetCaptureModeCommand === "function")
-      ? Model.buildV4l2SetCaptureModeCommand(root.device, mode)
-      : ["v4l2-ctl", "-d", root.device, "--set-fmt-video=width=" + mode.width + ",height=" + mode.height + ",pixelformat=" + mode.pixelformat, "--set-parm=" + mode.fps]
-    root.pendingCaptureCount++
-    queueCommand(cmd, "capture", root.device)
+    root.queueCaptureRestore(root.device, root.captureMode)
   }
 
   function queueCommand(cmd, kind, device) {
@@ -500,10 +506,34 @@ Item {
         root.captureFormatsQueried = false
         root.captureMode = ({})
         root.captureBusy = false
-        root.pendingCaptureCount = 0
-        root.commandQueue = []
+        var kept = []
+        var queue = root.commandQueue || []
+        for (var i = 0; i < queue.length; i++) {
+          var it = queue[i]
+          var isCapture = !Array.isArray(it) && it && it.kind === "capture"
+          if (isCapture && it.device && it.device !== root.device) {
+            kept.push(it)
+          } else if (isCapture) {
+            root.pendingCaptureCount = Math.max(0, root.pendingCaptureCount - 1)
+          }
+        }
+        root.commandQueue = kept
         root.previewWasActiveDuringSession = false
       }
+    }
+  }
+
+  Process {
+    id: restoreProbeProc
+    property string targetDevice: ""
+    property var targetMode: ({})
+    command: ["sh", "-c", "test -e \"$1\" || exit 2; test -r \"$1\" && test -w \"$1\" || exit 3; exit 0", "--", restoreProbeProc.targetDevice]
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.queueCaptureRestore(restoreProbeProc.targetDevice, restoreProbeProc.targetMode)
+      }
+      restoreProbeProc.targetDevice = ""
+      restoreProbeProc.targetMode = ({})
     }
   }
 
@@ -591,6 +621,18 @@ Item {
     onExited: function(exitCode) {
       var sameRead = v4l2ListProc.queryDevice === root.device && v4l2ListProc.queryGeneration === root.listGeneration
       if (sameRead && exitCode !== 0) {
+        if (root.previewWasActiveDuringSession && !restoreProbeProc.running) {
+          restoreProbeProc.targetDevice = root.device
+          var cm = root.captureMode || ({})
+          restoreProbeProc.targetMode = {
+            width: cm.width,
+            height: cm.height,
+            pixelformat: cm.pixelformat || "MJPG",
+            fps: cm.fps !== undefined ? cm.fps : 30
+          }
+          root.previewWasActiveDuringSession = false
+          restoreProbeProc.running = true
+        }
         root.devicePresent = false
         root.previewActive = false
         root.previewError = ""
