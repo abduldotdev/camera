@@ -993,7 +993,8 @@ PopupWindow {
 
           onWheel: function(wheel) {
             wheel.accepted = true
-            var step = (wheel.angleDelta.y / 120) * 48
+            // Qt Wayland touchpads deliver pixelDelta with angleDelta = 12x
+            var step = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y : (wheel.angleDelta.y / 120) * 48
             var maxY = Math.max(0, flick.contentHeight - flick.height)
             flick.contentY = Math.max(0, Math.min(maxY, flick.contentY - step))
           }
