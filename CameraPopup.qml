@@ -121,7 +121,7 @@ PopupWindow {
   property int cardPadding: Style.spacing.popupPadding
 
   implicitWidth: 380
-  implicitHeight: 560
+  implicitHeight: 640
 
   visible: open || card.opacity > 0
   color: "transparent"
