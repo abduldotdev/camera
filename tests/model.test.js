@@ -879,4 +879,84 @@ assert.equal(Model.CONTROLS.capture_mode, undefined)
 assert.equal(Model.CONTROLS.resolution, undefined)
 assert.equal(Model.CONTROLS.pixelformat, undefined)
 
+// ---------------------------------------------------------------------------
+// 15. ZOOM_WHEEL_MULTIPLIER and PREVIEW_STATES
+// ---------------------------------------------------------------------------
+
+assert.equal(Model.ZOOM_WHEEL_MULTIPLIER, 10)
+assert.deepEqual(Model.PREVIEW_STATES, [
+  "active",
+  "inactive",
+  "busy",
+  "permission",
+  "disconnected",
+  "unavailable"
+])
+assert.equal(Model.PREVIEW_STATES.length, 6)
+
+// ---------------------------------------------------------------------------
+// 16. wheelStep (delta, multiplier, clamping)
+// ---------------------------------------------------------------------------
+
+// +/-10 per notch with multiplier 10
+assert.equal(Model.wheelStep(150, 120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 160)
+assert.equal(Model.wheelStep(150, -120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 140)
+
+// Clamping at min (100) and max (400)
+assert.equal(Model.wheelStep(105, -120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 100)
+assert.equal(Model.wheelStep(100, -120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 100)
+assert.equal(Model.wheelStep(395, 120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 400)
+assert.equal(Model.wheelStep(400, 120, 1, Model.ZOOM_WHEEL_MULTIPLIER, 100, 400), 400)
+
+// Multiplier 1 for non-zoom controls (single-step)
+assert.equal(Model.wheelStep(128, 120, 1, 1, 0, 255), 129)
+assert.equal(Model.wheelStep(128, -120, 1, 1, 0, 255), 127)
+assert.equal(Model.wheelStep(0, -120, 1, 1, 0, 255), 0)
+assert.equal(Model.wheelStep(255, 120, 1, 1, 0, 255), 255)
+
+// ---------------------------------------------------------------------------
+// 17. PIXEL_FORMAT map and pickCameraFormat
+// ---------------------------------------------------------------------------
+
+assert.equal(Model.PIXEL_FORMAT.MJPG, 29)
+assert.equal(Model.PIXEL_FORMAT.YUYV, 17)
+assert.equal(Model.PIXEL_FORMAT.NV12, 18)
+
+const sampleVideoFormats = [
+  { width: 3840, height: 2160, pixelFormat: 29, minFrameRate: 5, maxFrameRate: 30 },
+  { width: 1920, height: 1080, pixelFormat: 29, minFrameRate: 5, maxFrameRate: 60 },
+  { width: 1920, height: 1080, pixelFormat: 17, minFrameRate: 5, maxFrameRate: 30 },
+  { width: 1280, height: 720, pixelFormat: 29, minFrameRate: 5, maxFrameRate: 60 }
+]
+
+// Exact match (width, height, pixelFormat, fps within [minFrameRate, maxFrameRate])
+const exactFmt = Model.pickCameraFormat(sampleVideoFormats, { width: 1920, height: 1080, pixelformat: "MJPG", fps: 30 })
+assert.equal(exactFmt, sampleVideoFormats[1])
+assert.equal(exactFmt.width, 1920)
+assert.equal(exactFmt.height, 1080)
+assert.equal(exactFmt.pixelFormat, 29)
+
+// fps-range fallback (fps outside range, falls back to resolution + pixelformat)
+const fpsFallbackFmt = Model.pickCameraFormat(sampleVideoFormats, { width: 1920, height: 1080, pixelformat: "YUYV", fps: 60 })
+assert.equal(fpsFallbackFmt, sampleVideoFormats[2])
+assert.equal(fpsFallbackFmt.pixelFormat, 17)
+
+// Resolution-only fallback (pixel format not matching, falls back to resolution)
+const resFallbackFmt = Model.pickCameraFormat(sampleVideoFormats, { width: 1280, height: 720, pixelformat: "NV12", fps: 30 })
+assert.equal(resFallbackFmt, sampleVideoFormats[3])
+assert.equal(resFallbackFmt.width, 1280)
+
+// No match -> null
+assert.equal(Model.pickCameraFormat(sampleVideoFormats, { width: 9999, height: 9999, pixelformat: "MJPG", fps: 30 }), null)
+assert.equal(Model.pickCameraFormat([], { width: 1920, height: 1080, pixelformat: "MJPG", fps: 30 }), null)
+assert.equal(Model.pickCameraFormat(sampleVideoFormats, null), null)
+assert.equal(Model.pickCameraFormat(null, { width: 1920, height: 1080 }), null)
+
+// Supports Qt QCameraFormat resolution structure with .resolution.width/.height
+const qtSampleFormats = [
+  { resolution: { width: 1920, height: 1080 }, pixelFormat: 29, minFrameRate: 5, maxFrameRate: 60 }
+]
+const qtMatchedFmt = Model.pickCameraFormat(qtSampleFormats, { width: 1920, height: 1080, pixelformat: "MJPG", fps: 30 })
+assert.equal(qtMatchedFmt, qtSampleFormats[0])
+
 console.log("All Model.js tests passed successfully!")

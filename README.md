@@ -12,7 +12,7 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
 
 - **Bar Widget Integration**: Compact camera icon in the Omarchy bar displaying connection status (dimmed when `/dev/video0` is disconnected).
 - **Fast & Stateless**: Communicates with hardware via non-blocking asynchronous `v4l2-ctl` and `cameractrls` calls. Zero open video streams while closed; live viewfinder opens on demand strictly when the settings popup is open.
-- **In-Popup Live Viewfinder**: On-demand 16:9 live video preview stream with strict V4L2 ownership lifecycle: opens `/dev/video0` only when the popup is visible, and synchronously releases the device file descriptor immediately on close so external conferencing apps are never locked out. Includes an atomic capture mode interlock (pausing preview across queued format mutations until Qt reports the camera inactive) and five explicit stream states: Active, Disconnected, Busy (`EBUSY`), Permission Denied (`EACCES`), and Unavailable. Hardware controls remain fully responsive and non-blocking during preview errors.
+- **In-Popup Live Viewfinder**: On-demand 16:9 live video preview stream with strict V4L2 ownership lifecycle: opens `/dev/video0` only when the popup is visible, streams at the configured capture mode, and synchronously releases the device file descriptor immediately on close, re-applying the configured driver default so external conferencing apps are never locked out. Includes an atomic capture mode interlock (pausing preview across queued format mutations until Qt reports the camera inactive) and six explicit stream states: Active, Inactive, Busy (`EBUSY`), Permission Denied (`EACCES`), Disconnected, and Unavailable. Hardware controls remain fully responsive and non-blocking during preview errors.
 - **Categorized Settings Popup**:
   - **Framing & Optics**: Hardware Field of View (FOV) selection (65°, 78°, 90°), Digital Zoom (100%–400%) with a 10% mouse-wheel multiplier ($M = 10$, stepping 10% per standard wheel notch between 100% and 400% while preserving fine 1% dragging precision), and Pan & Tilt sliders with step buttons.
   - **Capture Mode**: Resolution (1080p, 720p, 480p) and frame rate selection (up to 60 fps) to configure Linux kernel driver capture defaults.
@@ -21,7 +21,7 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
   - **Color & Image**: Auto white balance toggle, color temperature slider (2800K–7500K, active only when AWB is off), brightness, contrast, saturation, and sharpness sliders.
   - **Utilities**: Anti-flicker power line frequency selection (Off, 50 Hz, 60 Hz) and backlight compensation toggle.
 - **Factory Reset**: One-click "Reset defaults" button restores all controls to factory defaults.
-- **Graceful Disconnected View**: Displays a clear "No camera connected" message and retry button when the camera is unplugged.
+- **Graceful Disconnected View**: Displays a clear "Camera Disconnected" card ("No camera at /dev/video0") and retry button when the camera is unplugged.
 - **Full IPC Support**: Control any setting via `qs ipc call abduldotdev.camera ...` from scripts, keybindings, or other shell tools.
 
 ## Prerequisites
@@ -70,7 +70,7 @@ The plugin allows viewing the active capture mode and configuring the driver's d
 
 ### Behaviour & Limitations
 
-- **Persistent Driver Default**: The configured capture mode persists in the `uvcvideo` kernel driver across process opens. It serves as the initial default for non-negotiating V4L2 tools and applications (e.g. `v4l2-ctl --stream-mmap`, `mpv av://v4l2:/dev/video0` without size arguments, or cameractrls preview).
+- **Persistent Driver Default**: The configured capture mode persists in the `uvcvideo` kernel driver across process opens. It serves as the initial default for non-negotiating V4L2 tools and applications (e.g. `v4l2-ctl --stream-mmap`, `mpv av://v4l2:/dev/video0` without size arguments, or cameractrls preview). The in-popup live preview streams at the configured capture mode and automatically re-applies the driver default upon closing the popup so other applications continue to receive the user-configured resolution and frame rate.
 - **Exclusive Streaming Lock (`EBUSY`)**: Capture format and frame rate cannot be modified while any process is streaming video from `/dev/video0`. Attempting to set resolution or framerate while streaming returns `EBUSY` (`Device or resource busy`), and the popup indicates that the camera is currently in use.
 - **Negotiating Applications Override Mode**: Video conferencing applications, browsers, and streaming pipelines (such as Google Meet, Zoom, OBS Studio, ffmpeg, GStreamer, and PipeWire camera portal clients) negotiate their own resolution and framerate per stream upon opening the device. The plugin's default does not constrain negotiating apps; however, the popup actively displays whatever mode the streaming app negotiated.
 - **USB Link Speed & 4K Availability**: 4K resolution (3840×2160) requires a USB 3 link. Over a USB 2.0 link (480 Mbps), the camera hardware enumerates modes up to 1920×1080 @ 30 fps or 1600×896 @ 60 fps in MJPG.
@@ -119,7 +119,7 @@ The plugin manages 18 distinct camera controls:
 | **RightSight AI Auto-Framing** | **No** | **Impossible on Linux**. RightSight is a proprietary software neural network running on the host machine inside the Logi Tune app on macOS/Windows; it is not camera hardware. |
 | **Show Mode (Desk Tracking)** | **No** | **Impossible on Linux**. Show Mode relies on proprietary host software running computer vision on the video feed to detect when the camera tilts down toward a desk. |
 | **Logitech Firmware Updates** | **No** | **Impossible on Linux**. Logitech firmware distribution uses proprietary encrypted USB transport. MX Brio is not supported by `fwupd` / Linux Vendor Firmware Service (LVFS). |
-| **Live Viewfinder (In-Popup)** | **Yes** | Supported on demand inside the settings popup with a safe V4L2 lifecycle: streams only while the popup is open, releases `/dev/video0` immediately on close, interlocks with capture mode mutations to prevent `EBUSY`, and reports five distinct stream states (Active, Inactive, Busy, Permission Denied, Disconnected). Controls remain unblocked during stream errors. Continuous viewfinder in the bar remains omitted to prevent persistent camera locking. |
+| **Live Viewfinder (In-Popup)** | **Yes** | Supported on demand inside the settings popup with a safe V4L2 lifecycle: streams at the configured capture mode only while the popup is open, releases `/dev/video0` immediately on close, re-applies the configured capture mode driver default on close, interlocks with capture mode mutations to prevent `EBUSY`, and reports six distinct stream states (Active, Inactive, Busy, Permission Denied, Disconnected, Unavailable). Controls remain unblocked during stream errors. Continuous viewfinder in the bar remains omitted to prevent persistent camera locking. |
 
 ## IPC Interface Contract
 
