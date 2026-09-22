@@ -14,6 +14,7 @@ PopupWindow {
   property var owner: null
   property bool open: false
   property bool devicePresent: false
+  property bool permissionDenied: false
   property bool hasCameractrls: false
   property bool fovAvailable: false
   property var controls: ({})
@@ -35,35 +36,51 @@ PopupWindow {
     for (var i = 0; i < inputs.length; i++) {
       if (inputs[i].id === root.devicePath) return inputs[i]
     }
-    return mediaDevices.defaultVideoInput
+    return null
   }
 
-  CaptureSession {
-    id: captureSession
-    camera: camera
-    videoOutput: viewfinder
+  Loader {
+    id: cameraLoader
+    active: root.open && root.devicePresent && !root.permissionDenied && !root.captureBusy && !root.previewPaused && (root.pickCameraDevice() !== null)
+    sourceComponent: Component {
+      Item {
+        property alias camera: cam
+        property alias captureSession: cs
+
+        Camera {
+          id: cam
+          cameraDevice: root.pickCameraDevice()
+          active: true
+        }
+
+        CaptureSession {
+          id: cs
+          camera: cam
+          videoOutput: viewfinder
+        }
+      }
+    }
   }
 
-  Camera {
-    id: camera
-    cameraDevice: root.pickCameraDevice()
-    active: root.open && root.devicePresent && !root.captureBusy && !root.previewPaused
-  }
+  readonly property bool cameraActive: (cameraLoader.status === Loader.Ready && !!cameraLoader.item && !!cameraLoader.item.camera && cameraLoader.item.camera.active)
 
   readonly property string previewState: {
     if (!root.devicePresent) return "disconnected"
+    if (root.permissionDenied) return "permission"
+    if (!root.pickCameraDevice()) return "unavailable"
     if (root.captureBusy || root.previewPaused) return "busy"
-    if (camera.error !== Camera.NoError) {
-      var errStr = (camera.errorString || "").toLowerCase()
-      if (errStr.indexOf("in use") !== -1 || errStr.indexOf("busy") !== -1 || errStr.indexOf("resource") !== -1) {
-        return "busy"
-      }
+    var cam = (cameraLoader.status === Loader.Ready && cameraLoader.item) ? cameraLoader.item.camera : null
+    if (cam && cam.error !== Camera.NoError) {
+      var errStr = (cam.errorString || "").toLowerCase()
       if (errStr.indexOf("permission") !== -1 || errStr.indexOf("denied") !== -1 || errStr.indexOf("access") !== -1) {
         return "permission"
       }
+      if (errStr.indexOf("in use") !== -1 || errStr.indexOf("busy") !== -1 || errStr.indexOf("resource") !== -1) {
+        return "busy"
+      }
       return "unavailable"
     }
-    if (camera.active) return "active"
+    if (root.cameraActive) return "active"
     return "inactive"
   }
 
@@ -545,56 +562,99 @@ PopupWindow {
       }
 
       PanelSeparator {
+        id: headerSep
         foreground: root.fg
       }
 
-      // Offline / Empty state
+      // Live Viewfinder Frame
       Item {
-        id: emptyState
-        visible: !root.devicePresent
+        id: previewFrame
         width: parent.width
-        height: parent.height - headerItem.height - 20
+        height: Math.round(width * 9 / 16)
 
-        Column {
-          anchors.centerIn: parent
-          spacing: 12
+        Rectangle {
+          anchors.fill: parent
+          radius: Style.cornerRadius
+          color: root.bar ? root.bar.background : "#101315"
+          clip: true
 
-          Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "󰄀"
-            color: root.safeMuted
-            font.family: root.fontFamily
-            font.pixelSize: 36
-            opacity: 0.5
+          VideoOutput {
+            id: viewfinder
+            anchors.fill: parent
+            fillMode: VideoOutput.PreserveAspectCrop
+            visible: root.previewState === "active"
           }
 
-          Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "No camera connected"
-            color: root.fg
-            font.family: root.fontFamily
-            font.pixelSize: 14
-            font.bold: true
-          }
+          Item {
+            anchors.fill: parent
+            visible: root.previewState !== "active"
 
-          Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "Could not find video device at " + root.devicePath
-            color: root.safeMuted
-            font.family: root.fontFamily
-            font.pixelSize: 11
-          }
+            Column {
+              anchors.centerIn: parent
+              spacing: 6
+              width: parent.width - 24
 
-          Button {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "Retry"
-            bordered: true
-            foreground: root.fg
-            background: root.bg
-            accent: root.accent
-            fontFamily: root.fontFamily
-            fontSize: 12
-            onClicked: root.refreshRequested()
+              Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: {
+                  if (root.previewState === "disconnected") return "󰄀"
+                  if (root.previewState === "busy") return "󰄀"
+                  if (root.previewState === "permission") return "󰌾"
+                  return "󰄀"
+                }
+                color: {
+                  if (root.previewState === "busy" || root.previewState === "permission") return root.urgent
+                  return root.safeMuted
+                }
+                font.family: root.fontFamily
+                font.pixelSize: 28
+                horizontalAlignment: Text.AlignHCenter
+              }
+
+              Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: {
+                  if (root.previewState === "disconnected") return "Camera Disconnected"
+                  if (root.previewState === "busy") return "Camera In Use"
+                  if (root.previewState === "permission") return "Permission Denied"
+                  return "Preview Unavailable"
+                }
+                color: root.fg
+                font.family: root.fontFamily
+                font.pixelSize: 12
+                font.bold: true
+                horizontalAlignment: Text.AlignHCenter
+              }
+
+              Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: {
+                  if (root.previewState === "disconnected") return "No camera at " + root.devicePath
+                  if (root.previewState === "busy") return "In use by another application"
+                  var cam = (cameraLoader.status === Loader.Ready && cameraLoader.item) ? cameraLoader.item.camera : null
+                  return (cam && cam.errorString && cam.errorString !== "") ? cam.errorString : "Video stream unavailable"
+                }
+                color: root.safeMuted
+                font.family: root.fontFamily
+                font.pixelSize: 10
+                wrapMode: Text.Wrap
+                horizontalAlignment: Text.AlignHCenter
+                width: parent.width
+              }
+
+              Button {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Retry"
+                bordered: true
+                foreground: root.fg
+                background: root.bg
+                accent: root.accent
+                fontFamily: root.fontFamily
+                fontSize: 11
+                visible: root.previewState === "disconnected"
+                onClicked: root.refreshRequested()
+              }
+            }
           }
         }
       }
@@ -604,7 +664,7 @@ PopupWindow {
         id: flick
         visible: root.devicePresent
         width: parent.width
-        height: parent.height - headerItem.height - 20
+        height: Math.max(80, mainCol.height - headerItem.height - headerSep.height - previewFrame.height - (mainCol.spacing * 3))
         contentWidth: width
         contentHeight: sectionsCol.implicitHeight
         clip: true
@@ -614,86 +674,6 @@ PopupWindow {
           id: sectionsCol
           width: flick.width - 6
           spacing: 10
-
-          // Live Viewfinder Frame
-          Item {
-            id: previewFrame
-            width: parent.width
-            height: Math.round(width * 9 / 16)
-
-            Rectangle {
-              anchors.fill: parent
-              radius: Style.cornerRadius
-              color: root.bar ? root.bar.background : "#101315"
-              clip: true
-
-              VideoOutput {
-                id: viewfinder
-                anchors.fill: parent
-                fillMode: VideoOutput.PreserveAspectCrop
-                visible: root.previewState === "active"
-              }
-
-              Item {
-                anchors.fill: parent
-                visible: root.previewState !== "active"
-
-                Column {
-                  anchors.centerIn: parent
-                  spacing: 6
-                  width: parent.width - 24
-
-                  Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: {
-                      if (root.previewState === "disconnected") return "󰄀"
-                      if (root.previewState === "busy") return "󰄀"
-                      if (root.previewState === "permission") return "󰌾"
-                      return "󰄀"
-                    }
-                    color: {
-                      if (root.previewState === "busy" || root.previewState === "permission") return root.urgent
-                      return root.safeMuted
-                    }
-                    font.family: root.fontFamily
-                    font.pixelSize: 28
-                    horizontalAlignment: Text.AlignHCenter
-                  }
-
-                  Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: {
-                      if (root.previewState === "disconnected") return "Camera Disconnected"
-                      if (root.previewState === "busy") return "Camera In Use"
-                      if (root.previewState === "permission") return "Permission Denied"
-                      return "Preview Unavailable"
-                    }
-                    color: root.fg
-                    font.family: root.fontFamily
-                    font.pixelSize: 12
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                  }
-
-                  Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: {
-                      if (root.previewState === "disconnected") return "No camera at " + root.devicePath
-                      if (root.previewState === "busy") return "In use by another application"
-                      if (root.previewState === "permission") return "Access denied for " + root.devicePath
-                      return (camera.errorString && camera.errorString !== "") ? camera.errorString : "Video stream unavailable"
-                    }
-                    color: root.safeMuted
-                    font.family: root.fontFamily
-                    font.pixelSize: 10
-                    wrapMode: Text.Wrap
-                    horizontalAlignment: Text.AlignHCenter
-                    width: parent.width
-                  }
-                }
-              }
-            }
-          }
 
           // 1. Framing & Optics
           PanelSectionHeader {

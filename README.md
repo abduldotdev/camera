@@ -11,9 +11,10 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
 ## Features
 
 - **Bar Widget Integration**: Compact camera icon in the Omarchy bar displaying connection status (dimmed when `/dev/video0` is disconnected).
-- **Fast & Stateless**: Communicates with hardware via non-blocking asynchronous `v4l2-ctl` and `cameractrls` calls. No background daemons and no open video streams.
+- **Fast & Stateless**: Communicates with hardware via non-blocking asynchronous `v4l2-ctl` and `cameractrls` calls. Zero open video streams while closed; live viewfinder opens on demand strictly when the settings popup is open.
+- **In-Popup Live Viewfinder**: On-demand 16:9 live video preview stream with strict V4L2 ownership lifecycle: opens `/dev/video0` only when the popup is visible, and synchronously releases the device file descriptor immediately on close so external conferencing apps are never locked out. Includes an atomic capture mode interlock (pausing preview across queued format mutations until Qt reports the camera inactive) and five explicit stream states: Active, Disconnected, Busy (`EBUSY`), Permission Denied (`EACCES`), and Unavailable. Hardware controls remain fully responsive and non-blocking during preview errors.
 - **Categorized Settings Popup**:
-  - **Framing & Optics**: Hardware Field of View (FOV) selection (65°, 78°, 90°), Digital Zoom (100%–400%), and Pan & Tilt sliders with step buttons.
+  - **Framing & Optics**: Hardware Field of View (FOV) selection (65°, 78°, 90°), Digital Zoom (100%–400%) with a 10% mouse-wheel multiplier ($M = 10$, stepping 10% per standard wheel notch between 100% and 400% while preserving fine 1% dragging precision), and Pan & Tilt sliders with step buttons.
   - **Capture Mode**: Resolution (1080p, 720p, 480p) and frame rate selection (up to 60 fps) to configure Linux kernel driver capture defaults.
   - **Focus**: Continuous autofocus toggle and manual focus distance slider (active only when autofocus is off).
   - **Exposure**: Auto-exposure mode toggle (Aperture Priority vs Manual), manual exposure time slider (active only in manual mode), low-light compensation (dynamic framerate), and sensor gain slider.
@@ -118,7 +119,7 @@ The plugin manages 18 distinct camera controls:
 | **RightSight AI Auto-Framing** | **No** | **Impossible on Linux**. RightSight is a proprietary software neural network running on the host machine inside the Logi Tune app on macOS/Windows; it is not camera hardware. |
 | **Show Mode (Desk Tracking)** | **No** | **Impossible on Linux**. Show Mode relies on proprietary host software running computer vision on the video feed to detect when the camera tilts down toward a desk. |
 | **Logitech Firmware Updates** | **No** | **Impossible on Linux**. Logitech firmware distribution uses proprietary encrypted USB transport. MX Brio is not supported by `fwupd` / Linux Vendor Firmware Service (LVFS). |
-| **Live In-Bar Video Viewfinder** | *Omitted* | **Intentionally Out of Scope**. Opening the video stream (`/dev/video0`) inside the bar widget would acquire an exclusive V4L2 streaming lock, preventing video conferencing software (Zoom, Teams, Google Meet) from accessing the camera. |
+| **Live Viewfinder (In-Popup)** | **Yes** | Supported on demand inside the settings popup with a safe V4L2 lifecycle: streams only while the popup is open, releases `/dev/video0` immediately on close, interlocks with capture mode mutations to prevent `EBUSY`, and reports five distinct stream states (Active, Inactive, Busy, Permission Denied, Disconnected). Controls remain unblocked during stream errors. Continuous viewfinder in the bar remains omitted to prevent persistent camera locking. |
 
 ## IPC Interface Contract
 
