@@ -32,6 +32,7 @@ Item {
   property var captureFormats: []
   property bool captureFormatsQueried: false
   property bool captureBusy: false
+  property bool previewPaused: false
   property string modelName: "Logitech MX Brio"
   property var commandQueue: []
   property bool isDragging: false
@@ -39,6 +40,7 @@ Item {
   function close() {
     popup.open = false
     root.captureBusy = false
+    root.previewPaused = false
   }
   function open() {
     popup.open = true
@@ -89,6 +91,7 @@ Item {
     if (!picked) return
     root.listGeneration++
     root.captureMode = picked
+    root.previewPaused = true
     var cmd = (typeof Model.buildV4l2SetCaptureModeCommand === "function")
       ? Model.buildV4l2SetCaptureModeCommand(root.device, picked)
       : ["v4l2-ctl", "-d", root.device, "--set-fmt-video=width=" + picked.width + ",height=" + picked.height + ",pixelformat=" + picked.pixelformat, "--set-parm=" + picked.fps]
@@ -258,6 +261,7 @@ Item {
         root.captureFormatsQueried = false
         root.captureMode = ({})
         root.captureBusy = false
+        root.previewPaused = false
       }
     }
   }
@@ -379,6 +383,7 @@ Item {
     property string currentKind: ""
     onExited: function(exitCode) {
       if (cmdExecProc.currentKind === "capture") {
+        root.previewPaused = false
         if (exitCode !== 0) {
           root.captureBusy = true
         } else {
@@ -450,11 +455,13 @@ Item {
     captureMode: root.captureMode
     captureFormats: root.captureFormats
     captureBusy: root.captureBusy
+    previewPaused: root.previewPaused
     modelName: root.modelName
     devicePath: root.device
     onOpenChanged: {
       if (!popup.open) {
         root.captureBusy = false
+        root.previewPaused = false
       }
     }
     onRefreshRequested: root.refresh()

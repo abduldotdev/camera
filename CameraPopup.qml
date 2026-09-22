@@ -1,4 +1,5 @@
 import QtQuick
+import QtMultimedia
 import Quickshell
 import Quickshell.Hyprland
 import qs.Commons
@@ -20,9 +21,51 @@ PopupWindow {
   property var captureMode: ({})
   property var captureFormats: []
   property bool captureBusy: false
+  property bool previewPaused: false
   property string modelName: "Logitech MX Brio"
   property string devicePath: "/dev/video0"
   property bool isDragging: false
+
+  MediaDevices {
+    id: mediaDevices
+  }
+
+  function pickCameraDevice() {
+    var inputs = mediaDevices.videoInputs
+    for (var i = 0; i < inputs.length; i++) {
+      if (inputs[i].id === root.devicePath) return inputs[i]
+    }
+    return mediaDevices.defaultVideoInput
+  }
+
+  CaptureSession {
+    id: captureSession
+    camera: camera
+    videoOutput: viewfinder
+  }
+
+  Camera {
+    id: camera
+    cameraDevice: root.pickCameraDevice()
+    active: root.open && root.devicePresent && !root.captureBusy && !root.previewPaused
+  }
+
+  readonly property string previewState: {
+    if (!root.devicePresent) return "disconnected"
+    if (root.captureBusy || root.previewPaused) return "busy"
+    if (camera.error !== Camera.NoError) {
+      var errStr = (camera.errorString || "").toLowerCase()
+      if (errStr.indexOf("in use") !== -1 || errStr.indexOf("busy") !== -1 || errStr.indexOf("resource") !== -1) {
+        return "busy"
+      }
+      if (errStr.indexOf("permission") !== -1 || errStr.indexOf("denied") !== -1 || errStr.indexOf("access") !== -1) {
+        return "permission"
+      }
+      return "unavailable"
+    }
+    if (camera.active) return "active"
+    return "inactive"
+  }
 
   signal refreshRequested()
   signal controlChanged(string name, var value)
@@ -153,6 +196,7 @@ PopupWindow {
     property real maximum: 255
     property real step: 1
     property real value: 0
+    property int wheelMultiplier: 1
     property bool controlEnabled: true
     property string disabledHint: "Controlled automatically"
     signal committed(real val)
@@ -167,7 +211,10 @@ PopupWindow {
       id: debounceTimer
       interval: 150
       repeat: false
-      onTriggered: cs.committed(cs.liveVal)
+      onTriggered: {
+        root.isDragging = false
+        cs.committed(cs.liveVal)
+      }
     }
 
     Row {
@@ -195,28 +242,48 @@ PopupWindow {
       }
     }
 
-    PanelSlider {
-      id: slider
+    Item {
       width: parent.width
-      bar: root.bar
-      enabled: cs.controlEnabled
-      opacity: cs.controlEnabled ? 1.0 : 0.4
-      minimum: cs.minimum
-      maximum: cs.maximum
-      step: cs.step
-      integer: true
-      value: cs.value
+      height: slider.implicitHeight
 
-      onMoved: function(v) {
-        cs.liveVal = Math.round(v)
-        root.isDragging = true
-        debounceTimer.restart()
+      PanelSlider {
+        id: slider
+        anchors.fill: parent
+        bar: root.bar
+        enabled: cs.controlEnabled
+        opacity: cs.controlEnabled ? 1.0 : 0.4
+        minimum: cs.minimum
+        maximum: cs.maximum
+        step: cs.step
+        integer: true
+        value: cs.value
+
+        onMoved: function(v) {
+          cs.liveVal = Math.round(v)
+          root.isDragging = true
+          debounceTimer.restart()
+        }
+        onReleased: function(v) {
+          debounceTimer.stop()
+          root.isDragging = false
+          cs.liveVal = Math.round(v)
+          cs.committed(cs.liveVal)
+        }
       }
-      onReleased: function(v) {
-        debounceTimer.stop()
-        root.isDragging = false
-        cs.liveVal = Math.round(v)
-        cs.committed(cs.liveVal)
+
+      MouseArea {
+        anchors.fill: parent
+        enabled: cs.controlEnabled && cs.wheelMultiplier > 1
+        acceptedButtons: Qt.NoButton
+        onWheel: function(wheel) {
+          wheel.accepted = true
+          var delta = wheel.angleDelta.y > 0 ? (cs.step * cs.wheelMultiplier) : -(cs.step * cs.wheelMultiplier)
+          var next = Math.max(cs.minimum, Math.min(cs.maximum, cs.liveVal + delta))
+          if (slider.integer) next = Math.round(next)
+          cs.liveVal = next
+          root.isDragging = true
+          debounceTimer.restart()
+        }
       }
     }
   }
@@ -548,6 +615,86 @@ PopupWindow {
           width: flick.width - 6
           spacing: 10
 
+          // Live Viewfinder Frame
+          Item {
+            id: previewFrame
+            width: parent.width
+            height: Math.round(width * 9 / 16)
+
+            Rectangle {
+              anchors.fill: parent
+              radius: Style.cornerRadius
+              color: root.bar ? root.bar.background : "#101315"
+              clip: true
+
+              VideoOutput {
+                id: viewfinder
+                anchors.fill: parent
+                fillMode: VideoOutput.PreserveAspectCrop
+                visible: root.previewState === "active"
+              }
+
+              Item {
+                anchors.fill: parent
+                visible: root.previewState !== "active"
+
+                Column {
+                  anchors.centerIn: parent
+                  spacing: 6
+                  width: parent.width - 24
+
+                  Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: {
+                      if (root.previewState === "disconnected") return "󰄀"
+                      if (root.previewState === "busy") return "󰄀"
+                      if (root.previewState === "permission") return "󰌾"
+                      return "󰄀"
+                    }
+                    color: {
+                      if (root.previewState === "busy" || root.previewState === "permission") return root.urgent
+                      return root.safeMuted
+                    }
+                    font.family: root.fontFamily
+                    font.pixelSize: 28
+                    horizontalAlignment: Text.AlignHCenter
+                  }
+
+                  Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: {
+                      if (root.previewState === "disconnected") return "Camera Disconnected"
+                      if (root.previewState === "busy") return "Camera In Use"
+                      if (root.previewState === "permission") return "Permission Denied"
+                      return "Preview Unavailable"
+                    }
+                    color: root.fg
+                    font.family: root.fontFamily
+                    font.pixelSize: 12
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                  }
+
+                  Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: {
+                      if (root.previewState === "disconnected") return "No camera at " + root.devicePath
+                      if (root.previewState === "busy") return "In use by another application"
+                      if (root.previewState === "permission") return "Access denied for " + root.devicePath
+                      return (camera.errorString && camera.errorString !== "") ? camera.errorString : "Video stream unavailable"
+                    }
+                    color: root.safeMuted
+                    font.family: root.fontFamily
+                    font.pixelSize: 10
+                    wrapMode: Text.Wrap
+                    horizontalAlignment: Text.AlignHCenter
+                    width: parent.width
+                  }
+                }
+              }
+            }
+          }
+
           // 1. Framing & Optics
           PanelSectionHeader {
             text: "FRAMING & OPTICS"
@@ -573,6 +720,7 @@ PopupWindow {
             minimum: 100
             maximum: 400
             step: 1
+            wheelMultiplier: 10
             value: root.getVal("zoom_absolute", 100)
             onCommitted: function(v) { root.controlChanged("zoom_absolute", v) }
           }
