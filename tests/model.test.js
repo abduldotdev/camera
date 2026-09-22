@@ -938,4 +938,357 @@ const qtSampleFormats = [
 const qtMatchedFmt = Model.pickCameraFormat(qtSampleFormats, { width: 1920, height: 1080, pixelformat: "MJPG", fps: 30 })
 assert.equal(qtMatchedFmt, qtSampleFormats[0])
 
+// ---------------------------------------------------------------------------
+// 17. Device Discovery: buildV4l2DevicesCommand, parseV4l2Devices, selectActiveDevice
+// ---------------------------------------------------------------------------
+
+const DISCOVERY_FIXTURE = `card=MX Brio
+bus=usb-0000:08:00.1-2
+path=/dev/video0
+caps=0x04200001 Video Capture Streaming Extended Pix Format
+---
+card=MX Brio
+bus=usb-0000:08:00.1-2
+path=/dev/video1
+caps=0x04a00000 Metadata Capture Streaming Extended Pix Format
+---
+`
+
+const discovered = Model.parseV4l2Devices(DISCOVERY_FIXTURE)
+assert.equal(discovered.length, 1)
+assert.equal(discovered[0].path, "/dev/video0")
+assert.equal(discovered[0].name, "MX Brio")
+assert.equal(discovered[0].card, "MX Brio")
+assert.equal(discovered[0].bus, "usb-0000:08:00.1-2")
+
+// Multi-device fixture
+const MULTI_DEVICE_FIXTURE = `card=MX Brio
+bus=usb-0000:08:00.1-2
+path=/dev/video0
+caps=0x04200001 Video Capture Streaming Extended Pix Format
+---
+card=MX Brio
+bus=usb-0000:08:00.1-2
+path=/dev/video1
+caps=0x04a00000 Metadata Capture Streaming Extended Pix Format
+---
+card=Integrated Camera
+bus=usb-0000:00:14.0-5
+path=/dev/video2
+caps=0x04200001 Video Capture Streaming Extended Pix Format
+---
+card=Integrated Camera
+bus=usb-0000:00:14.0-5
+path=/dev/video3
+caps=0x04a00000 Metadata Capture Streaming Extended Pix Format
+---
+`
+
+const multiDiscovered = Model.parseV4l2Devices(MULTI_DEVICE_FIXTURE)
+assert.equal(multiDiscovered.length, 2)
+assert.equal(multiDiscovered[0].path, "/dev/video0")
+assert.equal(multiDiscovered[0].name, "MX Brio")
+assert.equal(multiDiscovered[0].card, "MX Brio")
+assert.equal(multiDiscovered[0].bus, "usb-0000:08:00.1-2")
+assert.equal(multiDiscovered[1].path, "/dev/video2")
+assert.equal(multiDiscovered[1].name, "Integrated Camera")
+assert.equal(multiDiscovered[1].card, "Integrated Camera")
+assert.equal(multiDiscovered[1].bus, "usb-0000:00:14.0-5")
+assert.ok(!multiDiscovered.some(d => d.path === "/dev/video1"))
+assert.ok(!multiDiscovered.some(d => d.path === "/dev/video3"))
+
+// parseV4l2Devices edge cases
+assert.deepEqual(Model.parseV4l2Devices(""), [])
+assert.deepEqual(Model.parseV4l2Devices(null), [])
+assert.deepEqual(Model.parseV4l2Devices(undefined), [])
+
+// selectActiveDevice assertions
+assert.equal(Model.selectActiveDevice(multiDiscovered, "/dev/video2"), multiDiscovered[1])
+assert.equal(Model.selectActiveDevice(multiDiscovered, ""), multiDiscovered[0])
+assert.equal(Model.selectActiveDevice(multiDiscovered, "/dev/video1"), multiDiscovered[0])
+assert.equal(Model.selectActiveDevice(multiDiscovered, null), multiDiscovered[0])
+assert.equal(Model.selectActiveDevice([], "/dev/video0"), null)
+assert.equal(Model.selectActiveDevice(null, "/dev/video0"), null)
+
+// deviceSelectorOptions assertions
+const selectorOpts = Model.deviceSelectorOptions(multiDiscovered)
+assert.deepEqual(selectorOpts, [
+  { value: "/dev/video0", label: "MX Brio" },
+  { value: "/dev/video2", label: "Integrated Camera" }
+])
+
+const dualSameCard = [
+  { path: "/dev/video2", name: "Integrated Camera", card: "Integrated Camera", bus: "bus-1" },
+  { path: "/dev/video4", name: "Integrated Camera", card: "Integrated Camera", bus: "bus-2" }
+]
+const dualSelectorOpts = Model.deviceSelectorOptions(dualSameCard)
+assert.deepEqual(dualSelectorOpts, [
+  { value: "/dev/video2", label: "Integrated Camera · /dev/video2" },
+  { value: "/dev/video4", label: "Integrated Camera · /dev/video4" }
+])
+assert.deepEqual(Model.deviceSelectorOptions([]), [])
+assert.deepEqual(Model.deviceSelectorOptions(null), [])
+
+// ---------------------------------------------------------------------------
+// 18. Auto-Exposure Resolver and Power Line Options
+// ---------------------------------------------------------------------------
+
+// resolveAutoExposure assertions
+// Brio menu
+assert.deepEqual(
+  Model.resolveAutoExposure([
+    { value: 1, label: "Manual Mode" },
+    { value: 3, label: "Aperture Priority Mode" }
+  ]),
+  { manual: 1, auto: 3 }
+)
+// Generic menu with 0 Auto Mode, 1 Manual Mode
+assert.deepEqual(
+  Model.resolveAutoExposure([
+    { value: 0, label: "Auto Mode" },
+    { value: 1, label: "Manual Mode" }
+  ]),
+  { manual: 1, auto: 0 }
+)
+// Generic menu with 1 Manual, 8 Shutter Priority
+assert.deepEqual(
+  Model.resolveAutoExposure([
+    { value: 1, label: "Manual" },
+    { value: 8, label: "Shutter Priority" }
+  ]),
+  { manual: 1, auto: 8 }
+)
+// Empty / null fallbacks
+assert.deepEqual(Model.resolveAutoExposure([]), { manual: 1, auto: 3 })
+assert.deepEqual(Model.resolveAutoExposure(null), { manual: 1, auto: 3 })
+assert.deepEqual(Model.resolveAutoExposure(undefined), { manual: 1, auto: 3 })
+
+// powerLineOptions assertions
+const brioPowerLine = [
+  { value: 0, label: "Disabled" },
+  { value: 1, label: "50 Hz" },
+  { value: 2, label: "60 Hz" }
+]
+assert.deepEqual(Model.powerLineOptions(brioPowerLine), [
+  { value: "0", label: "Disabled" },
+  { value: "1", label: "50 Hz" },
+  { value: "2", label: "60 Hz" }
+])
+assert.deepEqual(Model.powerLineOptions([]), [
+  { value: "0", label: "Off" },
+  { value: "1", label: "50 Hz" },
+  { value: "2", label: "60 Hz" }
+])
+assert.deepEqual(Model.powerLineOptions(null), [
+  { value: "0", label: "Off" },
+  { value: "1", label: "50 Hz" },
+  { value: "2", label: "60 Hz" }
+])
+
+// ---------------------------------------------------------------------------
+// 19. Discovery Command Builders
+// ---------------------------------------------------------------------------
+
+const devCmd = Model.buildV4l2DevicesCommand()
+assert.equal(devCmd.length, 3)
+assert.equal(devCmd[0], "sh")
+assert.equal(devCmd[1], "-c")
+assert.ok(devCmd[2].includes("v4l2-ctl --list-devices"))
+assert.ok(devCmd[2].includes("--info"))
+assert.ok(devCmd[2].includes("Device Caps"))
+
+assert.deepEqual(Model.buildV4l2InfoCommand("/dev/video2"), [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video2",
+  "--info"
+])
+assert.deepEqual(Model.buildV4l2InfoCommand(), [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video0",
+  "--info"
+])
+
+// ---------------------------------------------------------------------------
+// 20. Generic UVC Fixture and Device-Aware Reset Commands
+// ---------------------------------------------------------------------------
+
+const GENERIC_UVC_FIXTURE = `User Controls
+
+                     brightness 0x00980900 (int)    : min=-64 max=64 step=1 default=0 value=0 flags=has-min-max
+                       contrast 0x00980901 (int)    : min=0 max=64 step=1 default=32 value=32 flags=has-min-max
+                     saturation 0x00980902 (int)    : min=0 max=128 step=1 default=64 value=64 flags=has-min-max
+        white_balance_automatic 0x0098090c (bool)   : default=1 value=1
+                          gamma 0x00980910 (int)    : min=100 max=300 step=1 default=100 value=100 flags=has-min-max
+                           gain 0x00980913 (int)    : min=0 max=15 step=1 default=0 value=0 flags=has-min-max
+           power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=1 value=1 (50 Hz)
+				0: Disabled
+				1: 50 Hz
+				2: 60 Hz
+                      sharpness 0x0098091b (int)    : min=0 max=6 step=1 default=2 value=2 flags=has-min-max
+         backlight_compensation 0x0098091c (int)    : min=0 max=1 step=1 default=0 value=0 flags=has-min-max
+
+Camera Controls
+
+                  auto_exposure 0x009a0901 (menu)   : min=0 max=1 default=0 value=0 (Auto Mode)
+				0: Auto Mode
+				1: Manual Mode
+         exposure_time_absolute 0x009a0902 (int)    : min=1 max=5000 step=1 default=166 value=166 flags=inactive, has-min-max
+`
+
+const genericParsed = Model.parseV4l2Ctrls(GENERIC_UVC_FIXTURE)
+
+// Assert parsed fields on generic fixture
+assert.equal(genericParsed.brightness.min, -64)
+assert.equal(genericParsed.brightness.max, 64)
+assert.equal(genericParsed.brightness.step, 1)
+assert.equal(genericParsed.brightness.defaultVal, 0)
+
+assert.equal(genericParsed.contrast.min, 0)
+assert.equal(genericParsed.contrast.max, 64)
+assert.equal(genericParsed.contrast.step, 1)
+assert.equal(genericParsed.contrast.defaultVal, 32)
+
+assert.equal(genericParsed.saturation.min, 0)
+assert.equal(genericParsed.saturation.max, 128)
+assert.equal(genericParsed.saturation.step, 1)
+assert.equal(genericParsed.saturation.defaultVal, 64)
+
+assert.equal(genericParsed.white_balance_automatic.type, "bool")
+assert.equal(genericParsed.white_balance_automatic.defaultVal, 1)
+
+assert.equal(genericParsed.gamma.min, 100)
+assert.equal(genericParsed.gamma.max, 300)
+assert.equal(genericParsed.gamma.step, 1)
+assert.equal(genericParsed.gamma.defaultVal, 100)
+
+assert.equal(genericParsed.gain.min, 0)
+assert.equal(genericParsed.gain.max, 15)
+assert.equal(genericParsed.gain.step, 1)
+assert.equal(genericParsed.gain.defaultVal, 0)
+
+assert.equal(genericParsed.power_line_frequency.type, "menu")
+assert.equal(genericParsed.power_line_frequency.defaultVal, 1)
+assert.deepEqual(genericParsed.power_line_frequency.menuItems, [
+  { value: 0, label: "Disabled" },
+  { value: 1, label: "50 Hz" },
+  { value: 2, label: "60 Hz" }
+])
+
+assert.equal(genericParsed.sharpness.min, 0)
+assert.equal(genericParsed.sharpness.max, 6)
+assert.equal(genericParsed.sharpness.step, 1)
+assert.equal(genericParsed.sharpness.defaultVal, 2)
+
+assert.equal(genericParsed.backlight_compensation.min, 0)
+assert.equal(genericParsed.backlight_compensation.max, 1)
+assert.equal(genericParsed.backlight_compensation.step, 1)
+assert.equal(genericParsed.backlight_compensation.defaultVal, 0)
+
+assert.equal(genericParsed.auto_exposure.type, "menu")
+assert.equal(genericParsed.auto_exposure.defaultVal, 0)
+assert.deepEqual(genericParsed.auto_exposure.menuItems, [
+  { value: 0, label: "Auto Mode" },
+  { value: 1, label: "Manual Mode" }
+])
+
+assert.equal(genericParsed.exposure_time_absolute.min, 1)
+assert.equal(genericParsed.exposure_time_absolute.max, 5000)
+assert.equal(genericParsed.exposure_time_absolute.step, 1)
+assert.equal(genericParsed.exposure_time_absolute.defaultVal, 166)
+assert.equal(genericParsed.exposure_time_absolute.inactive, true)
+
+// Assert absent controls
+assert.equal(genericParsed.pan_absolute, undefined)
+assert.equal(genericParsed.tilt_absolute, undefined)
+assert.equal(genericParsed.zoom_absolute, undefined)
+assert.equal(genericParsed.focus_absolute, undefined)
+assert.equal(genericParsed.focus_automatic_continuous, undefined)
+assert.equal(genericParsed.white_balance_temperature, undefined)
+assert.equal(genericParsed.exposure_dynamic_framerate, undefined)
+
+// buildResetCommands on genericParsed
+const genericResetCmds = Model.buildResetCommands("/dev/video2", genericParsed)
+assert.equal(genericResetCmds.length, 3)
+
+// Command 1: auto_exposure=1
+assert.deepEqual(genericResetCmds[0], [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video2",
+  "--set-ctrl",
+  "auto_exposure=1"
+])
+
+// Command 2: exposure_time_absolute=166
+assert.deepEqual(genericResetCmds[1], [
+  "v4l2-ctl",
+  "-d",
+  "/dev/video2",
+  "--set-ctrl",
+  "exposure_time_absolute=166"
+])
+
+// Command 3: remaining controls
+assert.equal(genericResetCmds[2][0], "v4l2-ctl")
+assert.equal(genericResetCmds[2][1], "-d")
+assert.equal(genericResetCmds[2][2], "/dev/video2")
+assert.equal(genericResetCmds[2][3], "--set-ctrl")
+
+const cmd3Str = genericResetCmds[2][4]
+assert.ok(cmd3Str.includes("brightness=0"))
+assert.ok(cmd3Str.includes("contrast=32"))
+assert.ok(cmd3Str.includes("saturation=64"))
+assert.ok(cmd3Str.includes("white_balance_automatic=1"))
+assert.ok(cmd3Str.includes("gamma=100"))
+assert.ok(cmd3Str.includes("gain=0"))
+assert.ok(cmd3Str.includes("power_line_frequency=1"))
+assert.ok(cmd3Str.includes("sharpness=2"))
+assert.ok(cmd3Str.includes("backlight_compensation=0"))
+assert.ok(cmd3Str.includes("auto_exposure=0"))
+
+assert.ok(!cmd3Str.includes("exposure_time_absolute"))
+assert.ok(!cmd3Str.includes("pan_absolute"))
+assert.ok(!cmd3Str.includes("tilt_absolute"))
+assert.ok(!cmd3Str.includes("zoom_absolute"))
+assert.ok(!cmd3Str.includes("focus_absolute"))
+assert.ok(!cmd3Str.includes("white_balance_temperature"))
+assert.ok(!cmd3Str.includes("logitech_brio_fov"))
+
+// Empty map reset returns []
+assert.deepEqual(Model.buildResetCommands("/dev/video0", {}), [])
+
+// Passing existing Brio parseV4l2Ctrls + logitech_brio_fov
+const brioWithFov = Object.assign({}, v4l2, {
+  logitech_brio_fov: {
+    name: "logitech_brio_fov",
+    backend: "cameractrls",
+    defaultVal: 65,
+    default: 65
+  }
+})
+const brioResetCmds = Model.buildResetCommands("/dev/video0", brioWithFov)
+assert.equal(brioResetCmds.length, 4)
+assert.ok(brioResetCmds[0][4].includes("auto_exposure=1"))
+assert.ok(brioResetCmds[0][4].includes("white_balance_automatic=0"))
+assert.ok(brioResetCmds[0][4].includes("focus_automatic_continuous=0"))
+assert.deepEqual(brioResetCmds[3], [
+  "cameractrls",
+  "-d",
+  "/dev/video0",
+  "-c",
+  "logitech_brio_fov=65"
+])
+
+// Verify all 17 standard V4L2 controls are mentioned across commands 0-2
+const allV4l2InReset = brioResetCmds[0][4] + "," + brioResetCmds[1][4] + "," + brioResetCmds[2][4]
+for (const ctrlName of Object.keys(v4l2)) {
+  assert.ok(
+    allV4l2InReset.includes(ctrlName + "="),
+    `Brio reset commands missing mention of ${ctrlName}`
+  )
+}
+
 console.log("All Model.js tests passed successfully!")
+
