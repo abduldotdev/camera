@@ -23,9 +23,22 @@ function getV4l2Controls() {
   return Model.parseV4l2Ctrls(out)
 }
 
+function hasCameractrls() {
+  try {
+    cp.execFileSync("sh", ["-c", "command -v cameractrls"], { stdio: "ignore" })
+    return true
+  } catch {
+    return false
+  }
+}
+
 function getFovControl() {
+  if (!hasCameractrls()) {
+    return undefined
+  }
   const out = runCmd(Model.buildFovListCommand(device))
-  return Model.parseCameractrls(out).logitech_brio_fov
+  const parsed = Model.parseCameractrls(out)
+  return parsed.logitech_brio_fov
 }
 
 function getCurrentValue(name) {
@@ -113,6 +126,14 @@ try {
     }
 
     const beforeVal = getCurrentValue(name)
+    if (beforeVal === undefined && name === "logitech_brio_fov") {
+      if (!hasCameractrls()) {
+        console.log("SKIP: logitech_brio_fov skipped because cameractrls binary is not installed")
+      } else {
+        console.log("SKIP: logitech_brio_fov absent from cameractrls output on this device")
+      }
+      continue
+    }
     assert.notEqual(beforeVal, undefined, `Failed to query current value for ${name}`)
 
     const targetVal = pickDifferentValue(ctrl, beforeVal)
@@ -148,6 +169,37 @@ try {
     console.log(`${name}: ${beforeVal} -> ${afterVal} -> ${restoredVal}`)
   }
 
+  // === Testing Logitech MX Brio FOV Presets (65, 78, 90) ===
+  console.log("\n=== Testing Logitech FOV Presets (65, 78, 90) ===")
+  if (!hasCameractrls()) {
+    console.log("SKIP: cameractrls binary not installed")
+  } else {
+    const fovInitial = getFovControl()
+    if (fovInitial === undefined) {
+      console.log("SKIP: Logitech FOV control not available on this device")
+    } else {
+      const fovPresets = [65, 78, 90]
+      let fovMutated = false
+      try {
+        for (const preset of fovPresets) {
+          runCmd(Model.buildFovSetCommand(device, preset))
+          fovMutated = true
+          const readbackOut = runCmd(Model.buildFovListCommand(device))
+          const readbackFov = Model.parseCameractrls(readbackOut).logitech_brio_fov
+          assert.equal(readbackFov, preset, `FOV did not change to preset ${preset} (got ${readbackFov})`)
+          console.log(`logitech_brio_fov preset ${preset}° verified`)
+        }
+      } finally {
+        if (fovMutated && fovInitial !== undefined) {
+          runCmd(Model.buildFovSetCommand(device, fovInitial))
+          const restoredFov = getFovControl()
+          assert.equal(restoredFov, fovInitial, `FOV failed to restore to initial ${fovInitial}° (got ${restoredFov})`)
+          console.log(`FOV restored to initial setting: ${restoredFov}°`)
+        }
+      }
+    }
+  }
+
   // Run Model.buildResetCommands() once and assert every control equals its default afterwards
   console.log("\n=== Testing Factory Reset Commands ===")
   const resetCmds = Model.buildResetCommands(device)
@@ -159,6 +211,9 @@ try {
   const postResetFov = getFovControl()
   const defaults = Model.getDefaults()
   for (const name of Object.keys(Model.CONTROLS)) {
+    if (name === "logitech_brio_fov" && postResetFov === undefined) {
+      continue
+    }
     const val = name === "logitech_brio_fov" ? postResetFov : postResetV4l2[name]?.value
     assert.equal(val, defaults[name], `Control ${name} did not equal default ${defaults[name]} after reset (got ${val})`)
   }
@@ -326,9 +381,34 @@ try {
     }
   }
 
+  // === Testing Control Adjustment While Streaming (Non-blocking Controls Contract) ===
+  console.log("\n=== Testing Control Adjustment While Streaming ===")
+  const streamProc = cp.spawn("v4l2-ctl", ["-d", device, "--stream-mmap", "--stream-count=100"], {
+    stdio: "ignore"
+  })
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150)
+
+    const bBefore = getCurrentValue("brightness")
+    const bTarget = bBefore <= 240 ? bBefore + 5 : bBefore - 5
+    runCmd(Model.buildV4l2SetCommand(device, "brightness", bTarget))
+    const bAfter = getCurrentValue("brightness")
+    assert.equal(bAfter, bTarget, `Brightness control failed while streaming (got ${bAfter}, expected ${bTarget})`)
+
+    runCmd(Model.buildV4l2SetCommand(device, "brightness", bBefore))
+    const bRestored = getCurrentValue("brightness")
+    assert.equal(bRestored, bBefore, `Brightness restore failed while streaming (got ${bRestored}, expected ${bBefore})`)
+    console.log(`Verified control adjustment while streaming holds /dev/video0: brightness ${bBefore} -> ${bTarget} -> ${bRestored}`)
+  } finally {
+    try {
+      streamProc.kill("SIGKILL")
+    } catch {}
+  }
+
 } finally {
   // Always restore original values even if an assertion fails
   console.log("\nRestoring camera to original state...")
+  const restorationErrors = []
   for (const name of Object.keys(Model.CONTROLS)) {
     const origVal = originalValues[name]
     if (origVal === undefined) continue
@@ -350,10 +430,18 @@ try {
       } else {
         runCmd(Model.buildV4l2SetCommand(device, name, origVal))
       }
+
+      // Re-read and verify restoration
+      const verifyVal = getCurrentValue(name)
+      if (verifyVal !== origVal) {
+        restorationErrors.push(new Error(`Failed to verify restoration of ${name}: expected ${origVal}, got ${verifyVal}`))
+      }
     } catch (restoreErr) {
       console.error(`Error restoring ${name}: ${restoreErr.message}`)
+      restorationErrors.push(restoreErr)
     }
   }
+
   if (initialCaptureMode && initialCaptureMode.width) {
     try {
       const curMode = Model.parseV4l2CaptureMode(runCmd(Model.buildV4l2ListCommand(device)))
@@ -364,10 +452,28 @@ try {
         curMode.fps !== initialCaptureMode.fps
       ) {
         runCmd(Model.buildV4l2SetCaptureModeCommand(device, initialCaptureMode))
+        const verifyMode = Model.parseV4l2CaptureMode(runCmd(Model.buildV4l2ListCommand(device)))
+        if (
+          verifyMode.width !== initialCaptureMode.width ||
+          verifyMode.height !== initialCaptureMode.height ||
+          verifyMode.pixelformat !== initialCaptureMode.pixelformat ||
+          verifyMode.fps !== initialCaptureMode.fps
+        ) {
+          restorationErrors.push(new Error(`Capture mode restoration verification failed: expected ${initialCaptureMode.width}x${initialCaptureMode.height}@${initialCaptureMode.fps}, got ${verifyMode.width}x${verifyMode.height}@${verifyMode.fps}`))
+        }
       }
     } catch (restoreErr) {
       console.error(`Error restoring capture mode: ${restoreErr.message}`)
+      restorationErrors.push(restoreErr)
     }
   }
-  console.log("Camera state restoration complete.")
+
+  if (restorationErrors.length > 0) {
+    console.error(`\nFAILED: ${restorationErrors.length} restoration error(s) occurred:`)
+    for (const err of restorationErrors) {
+      console.error(` - ${err.message}`)
+    }
+    process.exit(1)
+  }
+  console.log("Camera state restoration complete and verified.")
 }

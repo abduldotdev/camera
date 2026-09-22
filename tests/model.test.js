@@ -356,6 +356,8 @@ assert.equal(v4l2.zoom_absolute.inactive, false)
 
 const fovParsed = Model.parseCameractrls(CAMERACTRLS_FIXTURE)
 assert.equal(fovParsed.logitech_brio_fov, 65)
+assert.equal(Model.parseCameractrls("Basic / Crop\n logitech_brio_fov = 78\n").logitech_brio_fov, 78)
+assert.equal(Model.parseCameractrls("Basic / Crop\n logitech_brio_fov = 90\n").logitech_brio_fov, 90)
 
 // Edge cases for parsers
 assert.deepEqual(Model.parseCameractrls(""), {})
@@ -481,6 +483,13 @@ assert.deepEqual(Model.buildFovListCommand("/dev/video2"), [
 ])
 
 // buildFovSetCommand
+assert.deepEqual(Model.buildFovSetCommand(null, 65), [
+  "cameractrls",
+  "-d",
+  "/dev/video0",
+  "-c",
+  "logitech_brio_fov=65"
+])
 assert.deepEqual(Model.buildFovSetCommand(null, 78), [
   "cameractrls",
   "-d",

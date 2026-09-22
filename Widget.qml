@@ -21,6 +21,7 @@ Item {
 
   property string device: (typeof Model !== "undefined" && Model.DEFAULT_DEVICE) ? Model.DEFAULT_DEVICE : "/dev/video0"
   property bool devicePresent: false
+  property bool permissionDenied: false
   property bool hasCameractrls: false
   property bool fovAvailable: false
   property bool refreshPending: false
@@ -32,6 +33,8 @@ Item {
   property var captureFormats: []
   property bool captureFormatsQueried: false
   property bool captureBusy: false
+  property int pendingCaptureCount: 0
+  readonly property bool previewPaused: pendingCaptureCount > 0
   property string modelName: "Logitech MX Brio"
   property var commandQueue: []
   property bool isDragging: false
@@ -89,6 +92,7 @@ Item {
     if (!picked) return
     root.listGeneration++
     root.captureMode = picked
+    root.pendingCaptureCount++
     var cmd = (typeof Model.buildV4l2SetCaptureModeCommand === "function")
       ? Model.buildV4l2SetCaptureModeCommand(root.device, picked)
       : ["v4l2-ctl", "-d", root.device, "--set-fmt-video=width=" + picked.width + ",height=" + picked.height + ",pixelformat=" + picked.pixelformat, "--set-parm=" + picked.fps]
@@ -121,13 +125,19 @@ Item {
 
   function pumpCommandQueue() {
     if (cmdExecProc.running || commandQueue.length === 0) return
+    var nextItem = commandQueue[0]
+    var nextKind = Array.isArray(nextItem) ? "control" : (nextItem.kind || "control")
+    if (nextKind === "capture" && popup.cameraActive) {
+      return
+    }
     var item = commandQueue.shift()
-    if (Array.isArray(item)) {
-      cmdExecProc.currentKind = "control"
-      cmdExecProc.command = item
+    var baseCmd = Array.isArray(item) ? item : item.cmd
+    var kind = Array.isArray(item) ? "control" : (item.kind || "control")
+    cmdExecProc.currentKind = kind
+    if (kind === "capture") {
+      cmdExecProc.command = ["sh", "-c", "for i in $(seq 1 15); do if ! fuser \"$1\" >/dev/null 2>&1; then break; fi; sleep 0.05; done; shift; exec \"$@\"", "--", root.device].concat(baseCmd)
     } else {
-      cmdExecProc.currentKind = item.kind || "control"
-      cmdExecProc.command = item.cmd
+      cmdExecProc.command = baseCmd
     }
     cmdExecProc.running = true
   }
@@ -238,10 +248,11 @@ Item {
 
   Process {
     id: checkDeviceProc
-    command: ["test", "-e", root.device]
+    command: ["sh", "-c", "test -e \"$1\" || exit 2; test -r \"$1\" && test -w \"$1\" || exit 3; exit 0", "--", root.device]
     onExited: function(exitCode) {
-      root.devicePresent = (exitCode === 0)
-      if (root.devicePresent) {
+      root.devicePresent = (exitCode === 0 || exitCode === 3)
+      root.permissionDenied = (exitCode === 3)
+      if (root.devicePresent && !root.permissionDenied) {
         if (!root.captureFormatsQueried && !v4l2FormatsProc.running) {
           root.captureFormatsQueried = true
           v4l2FormatsProc.running = true
@@ -258,6 +269,8 @@ Item {
         root.captureFormatsQueried = false
         root.captureMode = ({})
         root.captureBusy = false
+        root.pendingCaptureCount = 0
+        root.commandQueue = []
       }
     }
   }
@@ -379,6 +392,7 @@ Item {
     property string currentKind: ""
     onExited: function(exitCode) {
       if (cmdExecProc.currentKind === "capture") {
+        root.pendingCaptureCount = Math.max(0, root.pendingCaptureCount - 1)
         if (exitCode !== 0) {
           root.captureBusy = true
         } else {
@@ -443,6 +457,7 @@ Item {
     bar: root.bar
     owner: root
     devicePresent: root.devicePresent
+    permissionDenied: root.permissionDenied
     hasCameractrls: root.hasCameractrls
     fovAvailable: root.fovAvailable
     controls: root.controls
@@ -450,6 +465,7 @@ Item {
     captureMode: root.captureMode
     captureFormats: root.captureFormats
     captureBusy: root.captureBusy
+    previewPaused: root.previewPaused
     modelName: root.modelName
     devicePath: root.device
     onOpenChanged: {
@@ -457,6 +473,7 @@ Item {
         root.captureBusy = false
       }
     }
+    onCameraActiveChanged: root.pumpCommandQueue()
     onRefreshRequested: root.refresh()
     onControlChanged: function(name, val) { root.setControl(name, val) }
     onCaptureModeRequested: function(w, h, fps) { root.setCaptureMode(w, h, fps) }
