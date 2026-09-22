@@ -23,7 +23,7 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
   - **Utilities**: Anti-flicker power line frequency selection (with menu labels from the driver, e.g. Disabled, 50 Hz, 60 Hz) and backlight compensation toggle.
 - **Device-Aware Factory Reset**: One-click "Reset defaults" button restores the controls that camera reports, each to its reported default.
 - **Graceful Disconnected View**: Displays a clear "Camera Disconnected" card ("No capture device found") and retry button when no capture device is connected.
-- **Full IPC Support**: Control any setting, query active or available devices, or switch cameras via `qs ipc call abduldotdev.camera ...` from scripts, keybindings, or other shell tools.
+- **Full IPC Support**: Control any setting, query active or available devices, or switch cameras via `omarchy-shell abduldotdev.camera <method> ...` from scripts, keybindings, or other shell tools.
 
 ## Prerequisites
 
@@ -122,54 +122,54 @@ FOV is the MX Brio vendor control, and the other rows apply when the active came
 | **RightSight AI Auto-Framing** | **No** | **Impossible on Linux**. RightSight is a proprietary software neural network running on the host machine inside the Logi Tune app on macOS/Windows; it is not camera hardware. |
 | **Show Mode (Desk Tracking)** | **No** | **Impossible on Linux**. Show Mode relies on proprietary host software running computer vision on the video feed to detect when the camera tilts down toward a desk. |
 | **Logitech Firmware Updates** | **No** | **Impossible on Linux**. Logitech firmware distribution uses proprietary encrypted USB transport. MX Brio is not supported by `fwupd` / Linux Vendor Firmware Service (LVFS). |
-| **Live Viewfinder (In-Popup)** | **Yes** | Supported on demand inside the settings popup with a safe V4L2 lifecycle: streams at the configured capture mode only while the popup is open, releases `/dev/video0` immediately on close, re-applies the configured capture mode driver default on close, interlocks with capture mode mutations to prevent `EBUSY`, and reports six distinct stream states (Active, Inactive, Busy, Permission Denied, Disconnected, Unavailable). Controls remain unblocked during stream errors. Continuous viewfinder in the bar remains omitted to prevent persistent camera locking. |
+| **Live Viewfinder (In-Popup)** | **Yes** | Supported on demand inside the settings popup with a safe V4L2 lifecycle: streams at the configured capture mode only while the popup is open, releases the selected capture device immediately on close, re-applies the configured capture mode driver default on close, interlocks with capture mode mutations to prevent `EBUSY`, and reports six distinct stream states (Active, Inactive, Busy, Permission Denied, Disconnected, Unavailable). Controls remain unblocked during stream errors. Continuous viewfinder in the bar remains omitted to prevent persistent camera locking. |
 
 ## IPC Interface Contract
 
-The widget exposes an `IpcHandler` with target `"abduldotdev.camera"`. You can interact with it via `qs ipc call`:
+The widget exposes an `IpcHandler` with target `"abduldotdev.camera"`. You can interact with it via `omarchy-shell`:
 
 ```bash
 # Open the camera settings popup
-qs ipc call abduldotdev.camera open
+omarchy-shell abduldotdev.camera open
 
 # Close the camera settings popup
-qs ipc call abduldotdev.camera close
+omarchy-shell abduldotdev.camera close
 
 # Toggle the camera settings popup
-qs ipc call abduldotdev.camera toggle
+omarchy-shell abduldotdev.camera toggle
 
 # Reset all camera controls to factory defaults
-qs ipc call abduldotdev.camera resetDefaults
+omarchy-shell abduldotdev.camera resetDefaults
 
 # Query the current value of a control
-qs ipc call abduldotdev.camera getCtrl brightness
+omarchy-shell abduldotdev.camera getCtrl brightness
 # Output: 128
 
-qs ipc call abduldotdev.camera getCtrl logitech_brio_fov
+omarchy-shell abduldotdev.camera getCtrl logitech_brio_fov
 # Output: 65
 
 # Set a control value
-qs ipc call abduldotdev.camera setCtrl brightness 150
-qs ipc call abduldotdev.camera setCtrl white_balance_automatic 0
-qs ipc call abduldotdev.camera setCtrl white_balance_temperature 4500
-qs ipc call abduldotdev.camera setCtrl logitech_brio_fov 78
+omarchy-shell abduldotdev.camera setCtrl brightness 150
+omarchy-shell abduldotdev.camera setCtrl white_balance_automatic 0
+omarchy-shell abduldotdev.camera setCtrl white_balance_temperature 4500
+omarchy-shell abduldotdev.camera setCtrl logitech_brio_fov 78
 
 # Query current capture mode (resolution, fps, pixelformat)
-qs ipc call abduldotdev.camera getCaptureMode
+omarchy-shell abduldotdev.camera getCaptureMode
 # Output: 1280x720@30 MJPG
 
 # Set capture mode (resolution WxH, and optional fps)
-qs ipc call abduldotdev.camera setCaptureMode 1920x1080 30
-qs ipc call abduldotdev.camera setCaptureMode 1280x720 60
+omarchy-shell abduldotdev.camera setCaptureMode 1920x1080 30
+omarchy-shell abduldotdev.camera setCaptureMode 1280x720 60
 
 # Query the active capture device path
-qs ipc call abduldotdev.camera getDevice
+omarchy-shell abduldotdev.camera getDevice
 
 # Switch to a discovered capture device path
-qs ipc call abduldotdev.camera setDevice /dev/video2
+omarchy-shell abduldotdev.camera setDevice /dev/video2
 
 # List discovered capture devices as a JSON array of {path, name} objects
-qs ipc call abduldotdev.camera listDevices
+omarchy-shell abduldotdev.camera listDevices
 ```
 
 ## Testing
@@ -180,16 +180,12 @@ The plugin includes two test suites located in `tests/`:
    Validates V4L2 and cameractrls CLI output parsing, control metadata definitions, command builders, dependency rules, and factory defaults without requiring camera hardware. Also covers discovery parsing, the auto-exposure resolver, and a generic UVC fixture.
    ```bash
    node tests/model.test.js
-   # or from repository root:
-   node abduldotdev.camera/tests/model.test.js
    ```
 
 2. **Live Hardware Verification Test** (discovers connected camera):
    Discovers the capture device, skips with exit 0 and `SKIP: no capture device found` when none is connected, and exercises only the controls that device exposes. For each exposed control, it records the current value, sets a different valid value within parsed device limits, asserts hardware state change, restores original settings, and verifies device-aware factory reset behaviour. It also performs a capture-mode round trip against the discovered device verifying video format enumeration, active mode querying, and resolution/framerate mutation and restoration (skipping cleanly if the device is busy).
    ```bash
    node tests/hardware.test.js
-   # or from repository root:
-   node abduldotdev.camera/tests/hardware.test.js
    ```
 
 ## License
