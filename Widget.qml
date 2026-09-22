@@ -38,6 +38,7 @@ Item {
   property string modelName: "Logitech MX Brio"
   property var commandQueue: []
   property bool isDragging: false
+  property bool previewWasActiveDuringSession: false
 
   function close() {
     popup.open = false
@@ -115,6 +116,22 @@ Item {
       f = parsedFps
     }
     root.setCaptureMode(w, h, f)
+  }
+
+  function reapplyCaptureMode() {
+    if (!root.devicePresent || root.permissionDenied) return
+    if (!root.captureMode || root.captureMode.width === undefined || root.captureMode.height === undefined) return
+    var mode = {
+      width: root.captureMode.width,
+      height: root.captureMode.height,
+      pixelformat: root.captureMode.pixelformat || "MJPG",
+      fps: root.captureMode.fps !== undefined ? root.captureMode.fps : 30
+    }
+    var cmd = (typeof Model !== "undefined" && typeof Model.buildV4l2SetCaptureModeCommand === "function")
+      ? Model.buildV4l2SetCaptureModeCommand(root.device, mode)
+      : ["v4l2-ctl", "-d", root.device, "--set-fmt-video=width=" + mode.width + ",height=" + mode.height + ",pixelformat=" + mode.pixelformat, "--set-parm=" + mode.fps]
+    root.pendingCaptureCount++
+    queueCommand(cmd, "capture")
   }
 
   function queueCommand(cmd, kind) {
@@ -215,7 +232,7 @@ Item {
   }
 
   function readControls() {
-    if (!root.devicePresent) return
+    if (!root.devicePresent || root.permissionDenied) return
     var v4l2Busy = v4l2ListProc.running
     var fovBusy = root.fovAvailable && cameractrlsListProc.running
     if (v4l2Busy || fovBusy) {
@@ -271,6 +288,7 @@ Item {
         root.captureBusy = false
         root.pendingCaptureCount = 0
         root.commandQueue = []
+        root.previewWasActiveDuringSession = false
       }
     }
   }
@@ -332,7 +350,9 @@ Item {
         if (text && typeof Model !== "undefined" && typeof Model.parseV4l2CaptureMode === "function") {
           var parsedMode = Model.parseV4l2CaptureMode(text)
           if (parsedMode && parsedMode.width !== undefined) {
-            root.captureMode = parsedMode
+            if (!popup.cameraActive) {
+              root.captureMode = parsedMode
+            }
           }
         }
       }
@@ -419,7 +439,7 @@ Item {
     interval: 3000
     repeat: true
     running: popup.open && !root.isDragging
-    onTriggered: if (root.devicePresent) root.readControls()
+    onTriggered: if (root.devicePresent && !root.permissionDenied) root.readControls()
   }
 
   Grid {
@@ -469,11 +489,22 @@ Item {
     modelName: root.modelName
     devicePath: root.device
     onOpenChanged: {
-      if (!popup.open) {
+      if (popup.open) {
+        root.previewWasActiveDuringSession = false
+      } else {
         root.captureBusy = false
+        if (root.previewWasActiveDuringSession) {
+          root.previewWasActiveDuringSession = false
+          root.reapplyCaptureMode()
+        }
       }
     }
-    onCameraActiveChanged: root.pumpCommandQueue()
+    onCameraActiveChanged: {
+      if (popup.cameraActive) {
+        root.previewWasActiveDuringSession = true
+      }
+      root.pumpCommandQueue()
+    }
     onRefreshRequested: root.refresh()
     onControlChanged: function(name, val) { root.setControl(name, val) }
     onCaptureModeRequested: function(w, h, fps) { root.setCaptureMode(w, h, fps) }

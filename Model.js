@@ -11,6 +11,24 @@
 
 var DEFAULT_DEVICE = "/dev/video0"
 
+var ZOOM_WHEEL_MULTIPLIER = 10
+
+var PREVIEW_STATES = [
+  "active",
+  "inactive",
+  "busy",
+  "permission",
+  "disconnected",
+  "unavailable"
+]
+
+var PIXEL_FORMAT = {
+  MJPG: 29,
+  YUYV: 17,
+  NV12: 18
+}
+var PIXEL_FORMATS = PIXEL_FORMAT
+
 // Comprehensive metadata catalog for all 18 supported camera controls.
 // Standard controls map 1:1 to UVC controls queryable via v4l2-ctl.
 // Vendor controls (e.g. logitech_brio_fov) specify backend: "cameractrls".
@@ -800,12 +818,112 @@ function isControlActive(controlName, currentValues) {
   return depVal == ctrl.activeWhen
 }
 
+// Step helper for mouse-wheel increments with clamping.
+function wheelStep(value, angleDeltaY, step, multiplier, min, max) {
+  var val = (value !== undefined && value !== null) ? Number(value) : 0
+  var s = (step !== undefined && step !== null) ? Number(step) : 1
+  var m = (multiplier !== undefined && multiplier !== null) ? Number(multiplier) : 1
+  var dir = angleDeltaY > 0 ? 1 : (angleDeltaY < 0 ? -1 : 0)
+  var next = val + (dir * s * m)
+  if (min !== undefined && min !== null) {
+    next = Math.max(Number(min), next)
+  }
+  if (max !== undefined && max !== null) {
+    next = Math.min(Number(max), next)
+  }
+  return next
+}
+
+function _getFmtWidth(f) {
+  if (!f) return 0
+  if (typeof f.width === "number") return f.width
+  if (f.resolution && typeof f.resolution.width === "number") return f.resolution.width
+  return 0
+}
+
+function _getFmtHeight(f) {
+  if (!f) return 0
+  if (typeof f.height === "number") return f.height
+  if (f.resolution && typeof f.resolution.height === "number") return f.resolution.height
+  return 0
+}
+
+function _resolvePixelFormatInt(mode) {
+  if (!mode) return null
+  var pf = mode.pixelFormat !== undefined ? mode.pixelFormat : mode.pixelformat
+  if (typeof pf === "number") return pf
+  if (typeof pf === "string" && PIXEL_FORMAT[pf.toUpperCase()] !== undefined) {
+    return PIXEL_FORMAT[pf.toUpperCase()]
+  }
+  return null
+}
+
+// Selects the videoFormats entry matching root.captureMode width/height/pixelformat
+// and whose fps range contains captureMode.fps; falls back to resolution+pixelformat,
+// then resolution only; leaves unset (returns null) if no match.
+function pickCameraFormat(formats, captureMode) {
+  if (!formats || !formats.length || !captureMode) return null
+
+  var targetW = captureMode.width !== undefined ? Number(captureMode.width) : null
+  var targetH = captureMode.height !== undefined ? Number(captureMode.height) : null
+  if (!targetW || !targetH) return null
+
+  var targetPf = _resolvePixelFormatInt(captureMode)
+  var targetFps = (captureMode.fps !== undefined && captureMode.fps !== null && captureMode.fps !== "")
+    ? Number(captureMode.fps)
+    : null
+
+  // Tier 1: resolution + pixelformat matching and fps range contains captureMode.fps
+  for (var i = 0; i < formats.length; i++) {
+    var f = formats[i]
+    if (_getFmtWidth(f) === targetW && _getFmtHeight(f) === targetH) {
+      var pfMatch = (targetPf !== null) ? (f.pixelFormat === targetPf) : true
+      if (pfMatch) {
+        if (targetFps !== null) {
+          var minFps = (f.minFrameRate !== undefined) ? Number(f.minFrameRate) : 0
+          var maxFps = (f.maxFrameRate !== undefined) ? Number(f.maxFrameRate) : Infinity
+          if (targetFps >= minFps && targetFps <= maxFps) {
+            return f
+          }
+        } else {
+          return f
+        }
+      }
+    }
+  }
+
+  // Tier 2: resolution + pixelformat fallback
+  if (targetPf !== null) {
+    for (var j = 0; j < formats.length; j++) {
+      var f2 = formats[j]
+      if (_getFmtWidth(f2) === targetW && _getFmtHeight(f2) === targetH && f2.pixelFormat === targetPf) {
+        return f2
+      }
+    }
+  }
+
+  // Tier 3: resolution only fallback
+  for (var k = 0; k < formats.length; k++) {
+    var f3 = formats[k]
+    if (_getFmtWidth(f3) === targetW && _getFmtHeight(f3) === targetH) {
+      return f3
+    }
+  }
+
+  // Tier 4: no match
+  return null
+}
+
 // Export for Node.js test environment (in QML, top-level functions and vars
 // are directly accessible via import namespace).
 if (typeof module !== "undefined") {
   module.exports = {
     DEFAULT_DEVICE: DEFAULT_DEVICE,
     CONTROLS: CONTROLS,
+    ZOOM_WHEEL_MULTIPLIER: ZOOM_WHEEL_MULTIPLIER,
+    PREVIEW_STATES: PREVIEW_STATES,
+    PIXEL_FORMAT: PIXEL_FORMAT,
+    PIXEL_FORMATS: PIXEL_FORMAT,
     PREFERRED_RESOLUTIONS: PREFERRED_RESOLUTIONS,
     PREFERRED_FPS: PREFERRED_FPS,
     RESOLUTION_TAGS: RESOLUTION_TAGS,
@@ -825,6 +943,8 @@ if (typeof module !== "undefined") {
     isControlActive: isControlActive,
     resolutionOptions: resolutionOptions,
     fpsOptions: fpsOptions,
-    pickCaptureMode: pickCaptureMode
+    pickCaptureMode: pickCaptureMode,
+    wheelStep: wheelStep,
+    pickCameraFormat: pickCameraFormat
   }
 }

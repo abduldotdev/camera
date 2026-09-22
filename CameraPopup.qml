@@ -50,6 +50,12 @@ PopupWindow {
         Camera {
           id: cam
           cameraDevice: root.pickCameraDevice()
+          cameraFormat: {
+            var dev = root.pickCameraDevice()
+            if (!dev || !dev.videoFormats) return undefined
+            var fmt = Model.pickCameraFormat(dev.videoFormats, root.captureMode)
+            return fmt !== null ? fmt : undefined
+          }
           active: true
         }
 
@@ -294,10 +300,10 @@ PopupWindow {
         acceptedButtons: Qt.NoButton
         onWheel: function(wheel) {
           wheel.accepted = true
-          var delta = wheel.angleDelta.y > 0 ? (cs.step * cs.wheelMultiplier) : -(cs.step * cs.wheelMultiplier)
-          var next = Math.max(cs.minimum, Math.min(cs.maximum, cs.liveVal + delta))
+          var next = Model.wheelStep(cs.liveVal, wheel.angleDelta.y, cs.step, cs.wheelMultiplier, cs.minimum, cs.maximum)
           if (slider.integer) next = Math.round(next)
           cs.liveVal = next
+          slider.liveValue = next
           root.isDragging = true
           debounceTimer.restart()
         }
@@ -700,7 +706,7 @@ PopupWindow {
             minimum: 100
             maximum: 400
             step: 1
-            wheelMultiplier: 10
+            wheelMultiplier: Model.ZOOM_WHEEL_MULTIPLIER
             value: root.getVal("zoom_absolute", 100)
             onCommitted: function(v) { root.controlChanged("zoom_absolute", v) }
           }
