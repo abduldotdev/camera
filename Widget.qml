@@ -40,15 +40,78 @@ Item {
   property var commandQueue: []
   property bool isDragging: false
   property bool previewWasActiveDuringSession: false
+  property bool previewActive: false
+  property bool mirrorPreview: false
+  property string previewError: ""
 
   function close() {
     popup.open = false
     root.captureBusy = false
   }
   function open() {
+    if (popup.open) {
+      refresh()
+      return
+    }
     root.previewWasActiveDuringSession = false
+    root.previewActive = false
+    root.previewError = ""
     popup.open = true
     refresh()
+  }
+
+  function releasePreviewedDevice() {
+    if (!root.previewWasActiveDuringSession) return
+    root.previewWasActiveDuringSession = false
+    root.reapplyCaptureMode()
+  }
+
+  function startPreview() {
+    if (root.previewActive) return
+    root.previewError = ""
+    root.previewActive = true
+  }
+
+  function stopPreview() {
+    root.previewActive = false
+    root.previewError = ""
+    root.releasePreviewedDevice()
+  }
+
+  function notePreviewFailure(kind) {
+    if (kind !== "busy" && kind !== "permission" && kind !== "unavailable") return
+    root.previewError = kind
+    root.previewActive = false
+    root.releasePreviewedDevice()
+  }
+
+  function setPreviewActive(active) {
+    if (typeof Model === "undefined" || typeof Model.parseFlag !== "function") return
+    var flag = Model.parseFlag(active)
+    if (flag === null) return
+    if (flag) {
+      if (!popup.open) {
+        root.open()
+      }
+      root.startPreview()
+    } else {
+      root.stopPreview()
+    }
+  }
+
+  function setMirror(enabled) {
+    if (typeof Model === "undefined" || typeof Model.parseFlag !== "function") return
+    var flag = Model.parseFlag(enabled)
+    if (flag === null) return
+    root.mirrorPreview = flag
+  }
+
+  function getPreview() {
+    return popup.previewState
+  }
+
+  function getMirror() {
+    return root.mirrorPreview ? "1" : "0"
   }
   function toggle() {
     if (popup.open) close()
@@ -99,7 +162,7 @@ Item {
     var cmd = (typeof Model.buildV4l2SetCaptureModeCommand === "function")
       ? Model.buildV4l2SetCaptureModeCommand(root.device, picked)
       : ["v4l2-ctl", "-d", root.device, "--set-fmt-video=width=" + picked.width + ",height=" + picked.height + ",pixelformat=" + picked.pixelformat, "--set-parm=" + picked.fps]
-    queueCommand(cmd, "capture")
+    queueCommand(cmd, "capture", root.device)
   }
 
   function setCaptureModeFromIpc(resolution, fps) {
@@ -120,25 +183,33 @@ Item {
     root.setCaptureMode(w, h, f)
   }
 
+  function queueCaptureRestore(device, mode) {
+    if (typeof device !== "string" || device === "") return
+    if (!mode || mode.width === undefined || mode.height === undefined) return
+    var targetMode = {
+      width: mode.width,
+      height: mode.height,
+      pixelformat: mode.pixelformat || "MJPG",
+      fps: mode.fps !== undefined ? mode.fps : 30
+    }
+    var cmd = (typeof Model !== "undefined" && typeof Model.buildV4l2SetCaptureModeCommand === "function")
+      ? Model.buildV4l2SetCaptureModeCommand(device, targetMode)
+      : ["v4l2-ctl", "-d", device, "--set-fmt-video=width=" + targetMode.width + ",height=" + targetMode.height + ",pixelformat=" + targetMode.pixelformat, "--set-parm=" + targetMode.fps]
+    root.pendingCaptureCount++
+    queueCommand(cmd, "capture", device)
+  }
+
   function reapplyCaptureMode() {
     if (!root.devicePresent || root.permissionDenied) return
     if (!root.captureMode || root.captureMode.width === undefined || root.captureMode.height === undefined) return
-    var mode = {
-      width: root.captureMode.width,
-      height: root.captureMode.height,
-      pixelformat: root.captureMode.pixelformat || "MJPG",
-      fps: root.captureMode.fps !== undefined ? root.captureMode.fps : 30
-    }
-    var cmd = (typeof Model !== "undefined" && typeof Model.buildV4l2SetCaptureModeCommand === "function")
-      ? Model.buildV4l2SetCaptureModeCommand(root.device, mode)
-      : ["v4l2-ctl", "-d", root.device, "--set-fmt-video=width=" + mode.width + ",height=" + mode.height + ",pixelformat=" + mode.pixelformat, "--set-parm=" + mode.fps]
-    root.pendingCaptureCount++
-    queueCommand(cmd, "capture")
+    root.queueCaptureRestore(root.device, root.captureMode)
   }
 
-  function queueCommand(cmd, kind) {
+  function queueCommand(cmd, kind, device) {
     if (!cmd || !cmd.length) return
-    commandQueue.push({ cmd: cmd, kind: kind || "control" })
+    var entry = { cmd: cmd, kind: kind || "control" }
+    if (device) entry.device = device
+    commandQueue.push(entry)
     pumpCommandQueue()
   }
 
@@ -154,14 +225,18 @@ Item {
     var kind = Array.isArray(item) ? "control" : (item.kind || "control")
     cmdExecProc.currentKind = kind
     if (kind === "capture") {
-      cmdExecProc.command = ["sh", "-c", "for i in $(seq 1 15); do if ! fuser \"$1\" >/dev/null 2>&1; then break; fi; sleep 0.05; done; shift; exec \"$@\"", "--", root.device].concat(baseCmd)
+      var targetDev = (!Array.isArray(item) && item.device) ? item.device : root.device
+      cmdExecProc.currentDevice = targetDev
+      cmdExecProc.command = ["sh", "-c", "for i in $(seq 1 15); do if ! fuser \"$1\" >/dev/null 2>&1; then break; fi; sleep 0.05; done; shift; exec \"$@\"", "--", targetDev].concat(baseCmd)
     } else {
+      cmdExecProc.currentDevice = ""
       cmdExecProc.command = baseCmd
     }
     cmdExecProc.running = true
   }
 
   function setControl(name, value) {
+    if (name === "mirror" || name === "hflip" || name === "vflip" || name === "horizontal_flip") return
     var numVal = Number(value)
     if (name === "logitech_brio_fov") {
       if (!root.fovAvailable) {
@@ -271,6 +346,10 @@ Item {
     }
     if (!selected) {
       root.listGeneration++
+      root.commandQueue = root.commandQueue.filter(function (it) { return !Array.isArray(it) && it.kind === "capture" })
+      root.previewActive = false
+      root.previewError = ""
+      root.releasePreviewedDevice()
       root.device = ""
       root.modelName = "No camera connected"
       root.devicePresent = false
@@ -283,8 +362,6 @@ Item {
       root.captureFormats = []
       root.captureFormatsQueried = false
       root.captureBusy = false
-      root.pendingCaptureCount = 0
-      root.commandQueue = []
       return
     }
     if (selected.path === root.device) {
@@ -298,7 +375,10 @@ Item {
   function switchTo(deviceObj) {
     if (!deviceObj || !deviceObj.path) return
     root.listGeneration++
-    root.commandQueue = []
+    root.commandQueue = root.commandQueue.filter(function (it) { return !Array.isArray(it) && it.kind === "capture" })
+    root.previewActive = false
+    root.previewError = ""
+    root.releasePreviewedDevice()
     root.device = deviceObj.path
     root.modelName = deviceObj.card || deviceObj.name || "No camera connected"
     root.permissionDenied = false
@@ -311,7 +391,6 @@ Item {
     root.captureFormats = []
     root.captureFormatsQueried = false
     root.captureBusy = false
-    root.pendingCaptureCount = 0
     root.startDeviceCheck()
   }
 
@@ -363,6 +442,10 @@ Item {
     function getDevice(): string { return root.getDevice() }
     function setDevice(path: string) { root.setDevice(path) }
     function listDevices(): string { return root.listDevices() }
+    function getPreview(): string { return root.getPreview() }
+    function setPreviewActive(active: string) { root.setPreviewActive(active) }
+    function getMirror(): string { return root.getMirror() }
+    function setMirror(enabled: string) { root.setMirror(enabled) }
   }
 
   Process {
@@ -415,16 +498,42 @@ Item {
         }
         root.readControls()
       } else {
+        root.previewActive = false
+        root.previewError = ""
         root.fovAvailable = false
         root.pendingFov = null
         root.captureFormats = []
         root.captureFormatsQueried = false
         root.captureMode = ({})
         root.captureBusy = false
-        root.pendingCaptureCount = 0
-        root.commandQueue = []
+        var kept = []
+        var queue = root.commandQueue || []
+        for (var i = 0; i < queue.length; i++) {
+          var it = queue[i]
+          var isCapture = !Array.isArray(it) && it && it.kind === "capture"
+          if (isCapture && it.device && it.device !== root.device) {
+            kept.push(it)
+          } else if (isCapture) {
+            root.pendingCaptureCount = Math.max(0, root.pendingCaptureCount - 1)
+          }
+        }
+        root.commandQueue = kept
         root.previewWasActiveDuringSession = false
       }
+    }
+  }
+
+  Process {
+    id: restoreProbeProc
+    property string targetDevice: ""
+    property var targetMode: ({})
+    command: ["sh", "-c", "test -e \"$1\" || exit 2; test -r \"$1\" && test -w \"$1\" || exit 3; exit 0", "--", restoreProbeProc.targetDevice]
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.queueCaptureRestore(restoreProbeProc.targetDevice, restoreProbeProc.targetMode)
+      }
+      restoreProbeProc.targetDevice = ""
+      restoreProbeProc.targetMode = ({})
     }
   }
 
@@ -511,7 +620,23 @@ Item {
     }
     onExited: function(exitCode) {
       var sameRead = v4l2ListProc.queryDevice === root.device && v4l2ListProc.queryGeneration === root.listGeneration
-      if (sameRead && exitCode !== 0) root.devicePresent = false
+      if (sameRead && exitCode !== 0) {
+        if (root.previewWasActiveDuringSession && !restoreProbeProc.running) {
+          restoreProbeProc.targetDevice = root.device
+          var cm = root.captureMode || ({})
+          restoreProbeProc.targetMode = {
+            width: cm.width,
+            height: cm.height,
+            pixelformat: cm.pixelformat || "MJPG",
+            fps: cm.fps !== undefined ? cm.fps : 30
+          }
+          root.previewWasActiveDuringSession = false
+          restoreProbeProc.running = true
+        }
+        root.devicePresent = false
+        root.previewActive = false
+        root.previewError = ""
+      }
       if (root.refreshPending && !cameractrlsListProc.running) {
         root.refreshPending = false
         root.readControls()
@@ -567,13 +692,16 @@ Item {
   Process {
     id: cmdExecProc
     property string currentKind: ""
+    property string currentDevice: ""
     onExited: function(exitCode) {
       if (cmdExecProc.currentKind === "capture") {
         root.pendingCaptureCount = Math.max(0, root.pendingCaptureCount - 1)
-        if (exitCode !== 0) {
-          root.captureBusy = true
-        } else {
-          root.captureBusy = false
+        if (cmdExecProc.currentDevice === root.device) {
+          if (exitCode !== 0) {
+            root.captureBusy = true
+          } else {
+            root.captureBusy = false
+          }
         }
       }
       if (root.commandQueue.length > 0) {
@@ -643,17 +771,23 @@ Item {
     captureFormats: root.captureFormats
     captureBusy: root.captureBusy
     previewPaused: root.previewPaused
+    previewActive: root.previewActive
+    mirrorPreview: root.mirrorPreview
+    previewError: root.previewError
     modelName: root.modelName
     devicePath: root.device
     discoveredDevices: root.discoveredDevices
     onDeviceChangeRequested: function(path) { root.setDevice(path) }
+    onPreviewStartRequested: root.startPreview()
+    onPreviewStopRequested: root.stopPreview()
+    onMirrorChangeRequested: function(enabled) { root.mirrorPreview = enabled }
+    onPreviewFailed: function(kind) { root.notePreviewFailure(kind) }
     onOpenChanged: {
       if (!popup.open) {
+        root.previewActive = false
+        root.previewError = ""
         root.captureBusy = false
-        if (root.previewWasActiveDuringSession) {
-          root.previewWasActiveDuringSession = false
-          root.reapplyCaptureMode()
-        }
+        root.releasePreviewedDevice()
       }
     }
     onCameraActiveChanged: {

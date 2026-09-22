@@ -28,7 +28,24 @@ PopupWindow {
   property string devicePath: ""
   property var discoveredDevices: []
   property string previewBoundPath: ""
+  property bool previewActive: false
+  property bool mirrorPreview: false
+  property string previewError: ""
+  property bool previewFailureReported: false
   property bool isDragging: false
+
+  onPreviewActiveChanged: {
+    if (root.previewActive) root.previewFailureReported = false
+  }
+
+  readonly property bool startPreviewVisible: {
+    if (root.previewState === "idle") return true
+    if (!root.previewActive && !root.captureBusy && root.pickCameraDevice() !== null) {
+      if (root.previewState === "busy" && root.previewError === "busy") return true
+      if (root.previewState === "unavailable" && root.previewError === "unavailable") return true
+    }
+    return false
+  }
 
   MediaDevices {
     id: mediaDevices
@@ -44,7 +61,19 @@ PopupWindow {
 
   Loader {
     id: cameraLoader
-    active: root.open && root.devicePresent && !root.permissionDenied && !root.captureBusy && !root.previewPaused && root.previewBoundPath === root.devicePath && root.devicePath !== "" && (root.pickCameraDevice() !== null)
+    active: (typeof Model !== "undefined" && typeof Model.previewMayAcquire === "function")
+      ? Model.previewMayAcquire({
+          open: root.open,
+          activated: root.previewActive,
+          devicePresent: root.devicePresent,
+          permissionDenied: root.permissionDenied,
+          captureBusy: root.captureBusy,
+          previewPaused: root.previewPaused,
+          devicePath: root.devicePath,
+          previewBoundPath: root.previewBoundPath,
+          hasCameraInput: root.pickCameraDevice() !== null
+        })
+      : false
     sourceComponent: Component {
       Item {
         property alias camera: cam
@@ -60,6 +89,18 @@ PopupWindow {
           id: cam
           cameraDevice: root.pickCameraDevice()
           active: true
+          onErrorOccurred: function(error, errorString) {
+            if (root.previewFailureReported) return
+            root.previewFailureReported = true
+            var str = ((errorString || cam.errorString || "") + "").toLowerCase()
+            var kind = "unavailable"
+            if (str.indexOf("permission") !== -1 || str.indexOf("denied") !== -1 || str.indexOf("access") !== -1) {
+              kind = "permission"
+            } else if (str.indexOf("in use") !== -1 || str.indexOf("busy") !== -1 || str.indexOf("resource") !== -1) {
+              kind = "busy"
+            }
+            root.previewFailed(kind)
+          }
         }
 
         Binding {
@@ -83,20 +124,14 @@ PopupWindow {
   readonly property string previewState: {
     if (!root.devicePresent) return "disconnected"
     if (root.permissionDenied) return "permission"
-    if (!root.pickCameraDevice()) return "unavailable"
-    if (root.captureBusy || root.previewPaused) return "busy"
-    var cam = (cameraLoader.status === Loader.Ready && cameraLoader.item) ? cameraLoader.item.camera : null
-    if (cam && cam.error !== Camera.NoError) {
-      var errStr = (cam.errorString || "").toLowerCase()
-      if (errStr.indexOf("permission") !== -1 || errStr.indexOf("denied") !== -1 || errStr.indexOf("access") !== -1) {
-        return "permission"
-      }
-      if (errStr.indexOf("in use") !== -1 || errStr.indexOf("busy") !== -1 || errStr.indexOf("resource") !== -1) {
-        return "busy"
-      }
-      return "unavailable"
+    if (root.devicePath !== "" && root.pickCameraDevice() === null) return "unavailable"
+    if (!root.previewActive && root.captureBusy) return "busy"
+    if (!root.previewActive && (root.previewError === "busy" || root.previewError === "permission" || root.previewError === "unavailable")) {
+      return root.previewError
     }
-    if (root.cameraActive) return "active"
+    if (!root.previewActive) return "idle"
+    if (root.previewActive && (root.captureBusy || root.previewPaused)) return "busy"
+    if (root.previewActive && root.cameraActive) return "active"
     return "inactive"
   }
 
@@ -105,6 +140,10 @@ PopupWindow {
   signal captureModeRequested(int width, int height, real fps)
   signal resetRequested()
   signal deviceChangeRequested(string path)
+  signal previewStartRequested()
+  signal previewStopRequested()
+  signal mirrorChangeRequested(bool enabled)
+  signal previewFailed(string kind)
 
   readonly property var coordinatorKey: owner || root
   readonly property var anchorWindow: anchorItem ? anchorItem.QsWindow.window : null
@@ -619,6 +658,20 @@ PopupWindow {
             anchors.fill: parent
             fillMode: VideoOutput.PreserveAspectCrop
             visible: root.previewState === "active"
+            transform: Scale {
+              origin.x: viewfinder.width / 2
+              origin.y: viewfinder.height / 2
+              xScale: root.mirrorPreview ? -1 : 1
+              yScale: 1
+            }
+          }
+
+          MouseArea {
+            id: frameMouseArea
+            anchors.fill: parent
+            enabled: root.startPreviewVisible
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: root.previewStartRequested()
           }
 
           Item {
@@ -653,6 +706,8 @@ PopupWindow {
                   if (root.previewState === "disconnected") return "Camera Disconnected"
                   if (root.previewState === "busy") return "Camera In Use"
                   if (root.previewState === "permission") return "Permission Denied"
+                  if (root.previewState === "idle") return "Preview off"
+                  if (root.previewState === "inactive") return "Starting preview"
                   return "Preview Unavailable"
                 }
                 color: root.fg
@@ -665,6 +720,8 @@ PopupWindow {
               Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: {
+                  if (root.previewState === "idle") return "Click to start the live view"
+                  if (root.previewState === "inactive") return "Opening the camera"
                   if (root.previewState === "disconnected") return "No capture device found"
                   if (root.previewState === "busy") return "In use by another application"
                   var cam = (cameraLoader.status === Loader.Ready && cameraLoader.item) ? cameraLoader.item.camera : null
@@ -690,9 +747,59 @@ PopupWindow {
                 visible: root.previewState === "disconnected"
                 onClicked: root.refreshRequested()
               }
+
+              Button {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Start preview"
+                bordered: true
+                foreground: root.fg
+                background: root.bg
+                accent: root.accent
+                fontFamily: root.fontFamily
+                fontSize: 11
+                visible: root.startPreviewVisible
+                onClicked: root.previewStartRequested()
+              }
+
+              Button {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Stop preview"
+                bordered: true
+                foreground: root.fg
+                background: root.bg
+                accent: root.accent
+                fontFamily: root.fontFamily
+                fontSize: 11
+                visible: root.previewState === "inactive"
+                onClicked: root.previewStopRequested()
+              }
             }
           }
+
+          Button {
+            id: activeStopBtn
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 8
+            text: "Stop preview"
+            bordered: true
+            foreground: root.fg
+            background: root.bg
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: 11
+            visible: root.previewState === "active"
+            onClicked: root.previewStopRequested()
+          }
         }
+      }
+
+      CameraToggle {
+        id: mirrorToggle
+        label: "Mirror"
+        checked: root.mirrorPreview
+        visible: root.devicePath !== ""
+        onToggled: root.mirrorChangeRequested(!root.mirrorPreview)
       }
 
       // Online controls flickable
@@ -701,7 +808,7 @@ PopupWindow {
         objectName: "popupFlick"
         visible: root.devicePresent
         width: parent.width
-        height: Math.max(80, mainCol.height - headerItem.height - headerSep.height - previewFrame.height - (cameraSelector.visible ? cameraSelector.implicitHeight : 0) - (mainCol.spacing * (cameraSelector.visible ? 4 : 3)))
+        height: Math.max(80, mainCol.height - headerItem.height - headerSep.height - previewFrame.height - (cameraSelector.visible ? cameraSelector.implicitHeight : 0) - (mirrorToggle.visible ? (mirrorToggle.height + mainCol.spacing) : 0) - (mainCol.spacing * (cameraSelector.visible ? 4 : 3)))
         contentWidth: width
         contentHeight: sectionsCol.implicitHeight
         clip: true

@@ -888,6 +888,7 @@ assert.equal(Model.CONTROLS.pixelformat, undefined)
 // ---------------------------------------------------------------------------
 
 assert.deepEqual(Model.PREVIEW_STATES, [
+  "idle",
   "active",
   "inactive",
   "busy",
@@ -895,7 +896,7 @@ assert.deepEqual(Model.PREVIEW_STATES, [
   "disconnected",
   "unavailable"
 ])
-assert.equal(Model.PREVIEW_STATES.length, 6)
+assert.equal(Model.PREVIEW_STATES.length, 7)
 
 // ---------------------------------------------------------------------------
 // 16. PIXEL_FORMAT map and pickCameraFormat
@@ -1710,6 +1711,56 @@ const expectedLegacyResetVideo2 = [
   ]
 ]
 assert.deepEqual(Model.buildResetCommands("/dev/video2"), expectedLegacyResetVideo2)
+
+// ---------------------------------------------------------------------------
+// 24. Lazy preview gate, parseFlag, mirror is not a device control
+// ---------------------------------------------------------------------------
+
+assert.equal(Model.parseFlag("1"), true)
+assert.equal(Model.parseFlag("0"), false)
+for (const badFlag of ["", "true", "false", "on", "off", "2"]) {
+  assert.equal(Model.parseFlag(badFlag), null, `parseFlag(${JSON.stringify(badFlag)}) must be null`)
+}
+
+const acquireReady = {
+  open: true,
+  activated: true,
+  devicePresent: true,
+  permissionDenied: false,
+  captureBusy: false,
+  previewPaused: false,
+  devicePath: "/dev/video0",
+  previewBoundPath: "/dev/video0",
+  hasCameraInput: true
+}
+assert.equal(Model.previewMayAcquire(acquireReady), true)
+assert.equal(Model.previewMayAcquire(Object.assign({}, acquireReady, { open: false })), false)
+assert.equal(Model.previewMayAcquire(Object.assign({}, acquireReady, { activated: false })), false)
+assert.equal(Model.previewMayAcquire(Object.assign({}, acquireReady, { devicePresent: false })), false)
+assert.equal(Model.previewMayAcquire(Object.assign({}, acquireReady, { permissionDenied: true })), false)
+assert.equal(Model.previewMayAcquire(Object.assign({}, acquireReady, { captureBusy: true })), false)
+assert.equal(Model.previewMayAcquire(Object.assign({}, acquireReady, { previewPaused: true })), false)
+assert.equal(Model.previewMayAcquire(Object.assign({}, acquireReady, { devicePath: "" })), false)
+assert.equal(Model.previewMayAcquire(Object.assign({}, acquireReady, { previewBoundPath: "/dev/video2" })), false)
+assert.equal(Model.previewMayAcquire(Object.assign({}, acquireReady, { hasCameraInput: false })), false)
+assert.equal(Model.previewMayAcquire(null), false)
+assert.equal(Model.previewMayAcquire({}), false)
+
+assert.equal(Model.CONTROLS.mirror, undefined)
+assert.equal(Model.CONTROLS.hflip, undefined)
+assert.equal(Model.CONTROLS.vflip, undefined)
+assert.equal(Model.CONTROLS.horizontal_flip, undefined)
+assert.equal(Object.keys(Model.CONTROLS).length, 18)
+
+const forbiddenControlNames = ["hflip", "vflip", "horizontal_flip", "mirror"]
+const catalogResetArgv = Model.buildResetCommands().map(cmd => cmd.join(" ")).join(" ")
+const genericResetArgv = Model.buildResetCommands("/dev/video0", genericParsed).map(cmd => cmd.join(" ")).join(" ")
+const setCtrlArgv = Model.buildV4l2SetCommand("/dev/video0", "brightness", 1).join(" ")
+for (const name of forbiddenControlNames) {
+  assert.equal(catalogResetArgv.includes(name), false, `MX Brio catalog reset argv contains ${name}`)
+  assert.equal(genericResetArgv.includes(name), false, `generic UVC reset argv contains ${name}`)
+  assert.equal(setCtrlArgv.includes(name), false, `buildV4l2SetCommand argv contains ${name}`)
+}
 
 console.log("All Model.js tests passed successfully!")
 

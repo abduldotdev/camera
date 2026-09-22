@@ -119,6 +119,20 @@ if (initialFov !== undefined) {
 // Snapshot original capture mode
 const initialCaptureMode = Model.parseV4l2CaptureMode(runCmd(Model.buildV4l2ListCommand(device)))
 
+// Mirror is not a V4L2 control. A missing live flip control is a pass.
+assert.equal(Model.CONTROLS.mirror, undefined)
+assert.equal(Model.CONTROLS.hflip, undefined)
+assert.equal(Model.CONTROLS.vflip, undefined)
+assert.equal(Model.CONTROLS.horizontal_flip, undefined)
+for (const name of ["hflip", "vflip", "horizontal_flip"]) {
+  if (initialV4l2[name] === undefined) {
+    console.log(`PASS: ${name} not exposed`)
+  } else {
+    assert.equal(typeof initialV4l2[name], "object", `${name} exposed value must stay a parsed control`)
+    console.log(`${name}: exposed on ${device}`)
+  }
+}
+
 try {
   console.log(`=== ${deviceCard} Hardware Control Verification (${device}) ===`)
 
