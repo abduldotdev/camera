@@ -40,6 +40,9 @@ Item {
   property var commandQueue: []
   property bool isDragging: false
   property bool previewWasActiveDuringSession: false
+  property bool previewActive: false
+  property bool mirrorPreview: false
+  property string previewError: ""
 
   function close() {
     popup.open = false
@@ -47,8 +50,64 @@ Item {
   }
   function open() {
     root.previewWasActiveDuringSession = false
+    root.previewActive = false
+    root.previewError = ""
     popup.open = true
     refresh()
+  }
+
+  function releasePreviewedDevice() {
+    if (!root.previewWasActiveDuringSession) return
+    root.previewWasActiveDuringSession = false
+    root.reapplyCaptureMode()
+  }
+
+  function startPreview() {
+    if (root.previewActive) return
+    root.previewError = ""
+    root.previewActive = true
+  }
+
+  function stopPreview() {
+    root.previewActive = false
+    root.previewError = ""
+    root.releasePreviewedDevice()
+  }
+
+  function notePreviewFailure(kind) {
+    if (kind !== "busy" && kind !== "permission" && kind !== "unavailable") return
+    root.previewError = kind
+    root.previewActive = false
+    root.releasePreviewedDevice()
+  }
+
+  function setPreviewActive(active) {
+    if (typeof Model === "undefined" || typeof Model.parseFlag !== "function") return
+    var flag = Model.parseFlag(active)
+    if (flag === null) return
+    if (flag) {
+      if (!popup.open) {
+        root.open()
+      }
+      root.startPreview()
+    } else {
+      root.stopPreview()
+    }
+  }
+
+  function setMirror(enabled) {
+    if (typeof Model === "undefined" || typeof Model.parseFlag !== "function") return
+    var flag = Model.parseFlag(enabled)
+    if (flag === null) return
+    root.mirrorPreview = flag
+  }
+
+  function getPreview() {
+    return popup.previewState
+  }
+
+  function getMirror() {
+    return root.mirrorPreview ? "1" : "0"
   }
   function toggle() {
     if (popup.open) close()
@@ -162,6 +221,7 @@ Item {
   }
 
   function setControl(name, value) {
+    if (name === "mirror" || name === "hflip" || name === "vflip" || name === "horizontal_flip") return
     var numVal = Number(value)
     if (name === "logitech_brio_fov") {
       if (!root.fovAvailable) {
@@ -270,6 +330,9 @@ Item {
       selected = Model.selectActiveDevice(devices, root.device)
     }
     if (!selected) {
+      root.previewActive = false
+      root.previewError = ""
+      root.releasePreviewedDevice()
       root.listGeneration++
       root.device = ""
       root.modelName = "No camera connected"
@@ -297,6 +360,9 @@ Item {
 
   function switchTo(deviceObj) {
     if (!deviceObj || !deviceObj.path) return
+    root.previewActive = false
+    root.previewError = ""
+    root.releasePreviewedDevice()
     root.listGeneration++
     root.commandQueue = []
     root.device = deviceObj.path
@@ -363,6 +429,10 @@ Item {
     function getDevice(): string { return root.getDevice() }
     function setDevice(path: string) { root.setDevice(path) }
     function listDevices(): string { return root.listDevices() }
+    function getPreview(): string { return root.getPreview() }
+    function setPreviewActive(active: string) { root.setPreviewActive(active) }
+    function getMirror(): string { return root.getMirror() }
+    function setMirror(enabled: string) { root.setMirror(enabled) }
   }
 
   Process {
@@ -415,6 +485,8 @@ Item {
         }
         root.readControls()
       } else {
+        root.previewActive = false
+        root.previewError = ""
         root.fovAvailable = false
         root.pendingFov = null
         root.captureFormats = []
@@ -643,17 +715,23 @@ Item {
     captureFormats: root.captureFormats
     captureBusy: root.captureBusy
     previewPaused: root.previewPaused
+    previewActive: root.previewActive
+    mirrorPreview: root.mirrorPreview
+    previewError: root.previewError
     modelName: root.modelName
     devicePath: root.device
     discoveredDevices: root.discoveredDevices
     onDeviceChangeRequested: function(path) { root.setDevice(path) }
+    onPreviewStartRequested: root.startPreview()
+    onPreviewStopRequested: root.stopPreview()
+    onMirrorChangeRequested: function(enabled) { root.mirrorPreview = enabled }
+    onPreviewFailed: function(kind) { root.notePreviewFailure(kind) }
     onOpenChanged: {
       if (!popup.open) {
+        root.previewActive = false
+        root.previewError = ""
         root.captureBusy = false
-        if (root.previewWasActiveDuringSession) {
-          root.previewWasActiveDuringSession = false
-          root.reapplyCaptureMode()
-        }
+        root.releasePreviewedDevice()
       }
     }
     onCameraActiveChanged: {
