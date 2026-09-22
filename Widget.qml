@@ -207,6 +207,10 @@ Item {
         default: fovDef
       }
     }
+    if (!root.fovAvailable && root.hasCameractrls && cameractrlsListProc.running
+        && typeof Model !== "undefined" && Model.CONTROLS && Model.CONTROLS.logitech_brio_fov) {
+      root.pendingFov = Model.CONTROLS.logitech_brio_fov.defaultVal
+    }
     var cmds = (typeof Model !== "undefined" && typeof Model.buildResetCommands === "function")
       ? Model.buildResetCommands(root.device, copy)
       : []
@@ -253,6 +257,7 @@ Item {
     }
     if (popup.open && root.fovAvailable && !cameractrlsListProc.running) {
       cameractrlsListProc.queryGeneration = root.listGeneration
+      cameractrlsListProc.queryDevice = root.device
       cameractrlsListProc.running = true
     }
   }
@@ -284,7 +289,7 @@ Item {
     }
     if (selected.path === root.device) {
       root.modelName = selected.card || selected.name || root.modelName
-      root.readControls()
+      if (!root.isDragging) root.readControls()
       return
     }
     root.switchTo(selected)
@@ -405,6 +410,7 @@ Item {
         }
         if (root.hasCameractrls && !root.fovAvailable && !cameractrlsListProc.running) {
           cameractrlsListProc.queryGeneration = root.listGeneration
+          cameractrlsListProc.queryDevice = root.device
           cameractrlsListProc.running = true
         }
         root.readControls()
@@ -430,6 +436,7 @@ Item {
       if (root.hasCameractrls && root.devicePresent && (!root.fovAvailable || popup.open)) {
         if (!cameractrlsListProc.running) {
           cameractrlsListProc.queryGeneration = root.listGeneration
+          cameractrlsListProc.queryDevice = root.device
           cameractrlsListProc.running = true
         }
       } else if (exitCode !== 0) {
@@ -448,20 +455,22 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        if (v4l2FormatsProc.queryDevice !== root.device) {
-          root.captureFormatsQueried = false
-          if (root.device !== "" && root.devicePresent && !root.permissionDenied && !v4l2FormatsProc.running) {
-            root.captureFormatsQueried = true
-            v4l2FormatsProc.queryDevice = root.device
-            v4l2FormatsProc.running = true
-          }
-          return
-        }
+        if (v4l2FormatsProc.queryDevice !== root.device) return
         if (text && typeof Model !== "undefined" && typeof Model.parseV4l2Formats === "function") {
           var fmts = Model.parseV4l2Formats(text)
           if (fmts && fmts.length > 0) {
             root.captureFormats = fmts
           }
+        }
+      }
+    }
+    onExited: {
+      if (v4l2FormatsProc.queryDevice !== root.device) {
+        root.captureFormatsQueried = false
+        if (root.device !== "" && root.devicePresent && !root.permissionDenied && !v4l2FormatsProc.running) {
+          root.captureFormatsQueried = true
+          v4l2FormatsProc.queryDevice = root.device
+          v4l2FormatsProc.running = true
         }
       }
     }
@@ -513,6 +522,7 @@ Item {
   Process {
     id: cameractrlsListProc
     property int queryGeneration: 0
+    property string queryDevice: ""
     property bool foundFov: false
     command: (typeof Model !== "undefined" && typeof Model.buildFovListCommand === "function")
       ? Model.buildFovListCommand(root.device)
@@ -525,7 +535,7 @@ Item {
           var parsed = Model.parseCameractrls(text)
           if (parsed && parsed.logitech_brio_fov !== undefined) {
             cameractrlsListProc.foundFov = true
-            if (cameractrlsListProc.queryGeneration === root.listGeneration) {
+            if (cameractrlsListProc.queryDevice === root.device && cameractrlsListProc.queryGeneration === root.listGeneration) {
               root.fovControl = parsed
             }
           }
@@ -533,11 +543,9 @@ Item {
       }
     }
     onExited: function(exitCode) {
-      if (cameractrlsListProc.queryGeneration === root.listGeneration) {
-        if (exitCode !== 0 || !cameractrlsListProc.foundFov) {
-          root.fovAvailable = false
-          root.pendingFov = null
-        } else {
+      var sameDevice = cameractrlsListProc.queryDevice === root.device
+      if (exitCode === 0 && cameractrlsListProc.foundFov) {
+        if (sameDevice) {
           root.fovAvailable = true
           if (root.pendingFov !== null) {
             var val = root.pendingFov
@@ -545,6 +553,9 @@ Item {
             root.setControl("logitech_brio_fov", val)
           }
         }
+      } else if (sameDevice && cameractrlsListProc.queryGeneration === root.listGeneration) {
+        root.fovAvailable = false
+        root.pendingFov = null
       }
       if (root.refreshPending && !v4l2ListProc.running) {
         root.refreshPending = false
