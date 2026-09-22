@@ -4,9 +4,7 @@ Native `omarchy-shell` bar widget and settings popup providing Logi Tune-like co
 
 ## Screenshots
 
-| Framing, optics & capture mode | Color, image & utilities |
-|---|---|
-| ![Framing & Optics and Capture Mode](preview.png) | ![Color & Image and Utilities](assets/color-and-utilities.png) |
+![Camera popup](preview.png)
 
 ## Features
 
