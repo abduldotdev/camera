@@ -24,8 +24,10 @@ PopupWindow {
   property var captureFormats: []
   property bool captureBusy: false
   property bool previewPaused: false
-  property string modelName: "Logitech MX Brio"
-  property string devicePath: "/dev/video0"
+  property string modelName: "No camera connected"
+  property string devicePath: ""
+  property var discoveredDevices: []
+  property string previewBoundPath: ""
   property bool isDragging: false
 
   MediaDevices {
@@ -42,7 +44,7 @@ PopupWindow {
 
   Loader {
     id: cameraLoader
-    active: root.open && root.devicePresent && !root.permissionDenied && !root.captureBusy && !root.previewPaused && (root.pickCameraDevice() !== null)
+    active: root.open && root.devicePresent && !root.permissionDenied && !root.captureBusy && !root.previewPaused && root.previewBoundPath === root.devicePath && root.devicePath !== "" && (root.pickCameraDevice() !== null)
     sourceComponent: Component {
       Item {
         property alias camera: cam
@@ -102,6 +104,7 @@ PopupWindow {
   signal controlChanged(string name, var value)
   signal captureModeRequested(int width, int height, real fps)
   signal resetRequested()
+  signal deviceChangeRequested(string path)
 
   readonly property var coordinatorKey: owner || root
   readonly property var anchorWindow: anchorItem ? anchorItem.QsWindow.window : null
@@ -132,6 +135,13 @@ PopupWindow {
     if (!bar) return
     if (open) bar.requestPopout(coordinatorKey)
     else if (bar.activePopout === coordinatorKey) bar.releasePopout(coordinatorKey)
+  }
+
+  onDevicePathChanged: {
+    root.previewBoundPath = ""
+    Qt.callLater(function() {
+      root.previewBoundPath = root.devicePath
+    })
   }
 
   HyprlandFocusGrab {
@@ -201,6 +211,18 @@ PopupWindow {
       return Model.CONTROLS[name][field]
     }
     return fallback
+  }
+
+  function hasCtrl(name) {
+    return !!(root.controls && root.controls[name] !== undefined)
+  }
+
+  function exposureModes() {
+    var items = root.controls && root.controls.auto_exposure && root.controls.auto_exposure.menuItems
+    if (typeof Model !== "undefined" && typeof Model.resolveAutoExposure === "function") {
+      return Model.resolveAutoExposure(items)
+    }
+    return { manual: 1, auto: 3 }
   }
 
   function isInactive(name) {
@@ -536,7 +558,9 @@ PopupWindow {
             }
 
             Text {
-              text: root.devicePath + (root.devicePresent ? " · Connected" : " · Disconnected")
+              text: root.devicePath !== ""
+                ? (root.devicePath + (root.devicePresent ? " · Connected" : " · Disconnected"))
+                : "Disconnected"
               color: root.devicePresent ? root.safeMuted : root.urgent
               font.family: root.fontFamily
               font.pixelSize: 10
@@ -563,6 +587,19 @@ PopupWindow {
       PanelSeparator {
         id: headerSep
         foreground: root.fg
+      }
+
+      CameraSegmented {
+        id: cameraSelector
+        visible: root.discoveredDevices && root.discoveredDevices.length > 1
+        label: "Camera"
+        options: (typeof Model !== "undefined" && typeof Model.deviceSelectorOptions === "function")
+          ? Model.deviceSelectorOptions(root.discoveredDevices)
+          : []
+        value: root.devicePath
+        onChanged: function(v) {
+          if (v && v !== root.devicePath) root.deviceChangeRequested(v)
+        }
       }
 
       // Live Viewfinder Frame
@@ -628,7 +665,7 @@ PopupWindow {
               Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: {
-                  if (root.previewState === "disconnected") return "No camera at " + root.devicePath
+                  if (root.previewState === "disconnected") return "No capture device found"
                   if (root.previewState === "busy") return "In use by another application"
                   var cam = (cameraLoader.status === Loader.Ready && cameraLoader.item) ? cameraLoader.item.camera : null
                   return (cam && cam.errorString && cam.errorString !== "") ? cam.errorString : "Video stream unavailable"
@@ -664,7 +701,7 @@ PopupWindow {
         objectName: "popupFlick"
         visible: root.devicePresent
         width: parent.width
-        height: Math.max(80, mainCol.height - headerItem.height - headerSep.height - previewFrame.height - (mainCol.spacing * 3))
+        height: Math.max(80, mainCol.height - headerItem.height - headerSep.height - previewFrame.height - (cameraSelector.visible ? cameraSelector.implicitHeight : 0) - (mainCol.spacing * (cameraSelector.visible ? 4 : 3)))
         contentWidth: width
         contentHeight: sectionsCol.implicitHeight
         clip: true
@@ -692,55 +729,64 @@ PopupWindow {
           spacing: 10
 
           // 1. Framing & Optics
-          PanelSectionHeader {
-            text: "FRAMING & OPTICS"
-            foreground: root.fg
-            fontFamily: root.fontFamily
-          }
+          Column {
+            width: parent.width
+            spacing: 10
+            visible: root.fovAvailable || root.hasCtrl("zoom_absolute") || root.hasCtrl("pan_absolute") || root.hasCtrl("tilt_absolute")
 
-          CameraSegmented {
-            visible: root.fovAvailable
-            label: "Field of View"
-            options: [
-              { value: "65", label: "65°" },
-              { value: "78", label: "78°" },
-              { value: "90", label: "90°" }
-            ]
-            value: (root.fovControl && root.fovControl.logitech_brio_fov !== undefined) ? String(root.fovControl.logitech_brio_fov) : "65"
-            onChanged: function(v) { root.controlChanged("logitech_brio_fov", parseInt(v, 10)) }
-          }
+            PanelSectionHeader {
+              text: "FRAMING & OPTICS"
+              foreground: root.fg
+              fontFamily: root.fontFamily
+            }
 
-          CameraSlider {
-            objectName: "slider_zoom_absolute"
-            label: "Digital Zoom"
-            unit: "%"
-            minimum: 100
-            maximum: 400
-            step: 1
-            value: root.getVal("zoom_absolute", 100)
-            onCommitted: function(v) { root.controlChanged("zoom_absolute", v) }
-          }
+            CameraSegmented {
+              visible: root.fovAvailable
+              label: "Field of View"
+              options: [
+                { value: "65", label: "65°" },
+                { value: "78", label: "78°" },
+                { value: "90", label: "90°" }
+              ]
+              value: (root.fovControl && root.fovControl.logitech_brio_fov !== undefined) ? String(root.fovControl.logitech_brio_fov) : "65"
+              onChanged: function(v) { root.controlChanged("logitech_brio_fov", parseInt(v, 10)) }
+            }
 
-          CameraPanTilt {
-            label: "Pan"
-            value: root.getVal("pan_absolute", 0)
-            minimum: root.getMeta("pan_absolute", "min", -72000)
-            maximum: root.getMeta("pan_absolute", "max", 72000)
-            step: root.getMeta("pan_absolute", "step", 3600)
-            onStepRequested: function(v) { root.controlChanged("pan_absolute", v) }
-          }
+            CameraSlider {
+              objectName: "slider_zoom_absolute"
+              visible: root.hasCtrl("zoom_absolute")
+              label: "Digital Zoom"
+              unit: "%"
+              minimum: root.getMeta("zoom_absolute", "min", 100)
+              maximum: root.getMeta("zoom_absolute", "max", 400)
+              step: root.getMeta("zoom_absolute", "step", 1)
+              value: root.getVal("zoom_absolute", 100)
+              onCommitted: function(v) { root.controlChanged("zoom_absolute", v) }
+            }
 
-          CameraPanTilt {
-            label: "Tilt"
-            value: root.getVal("tilt_absolute", 0)
-            minimum: root.getMeta("tilt_absolute", "min", -72000)
-            maximum: root.getMeta("tilt_absolute", "max", 72000)
-            step: root.getMeta("tilt_absolute", "step", 3600)
-            onStepRequested: function(v) { root.controlChanged("tilt_absolute", v) }
-          }
+            CameraPanTilt {
+              visible: root.hasCtrl("pan_absolute")
+              label: "Pan"
+              value: root.getVal("pan_absolute", 0)
+              minimum: root.getMeta("pan_absolute", "min", -72000)
+              maximum: root.getMeta("pan_absolute", "max", 72000)
+              step: root.getMeta("pan_absolute", "step", 3600)
+              onStepRequested: function(v) { root.controlChanged("pan_absolute", v) }
+            }
 
-          PanelSeparator {
-            foreground: root.fg
+            CameraPanTilt {
+              visible: root.hasCtrl("tilt_absolute")
+              label: "Tilt"
+              value: root.getVal("tilt_absolute", 0)
+              minimum: root.getMeta("tilt_absolute", "min", -72000)
+              maximum: root.getMeta("tilt_absolute", "max", 72000)
+              step: root.getMeta("tilt_absolute", "step", 3600)
+              onStepRequested: function(v) { root.controlChanged("tilt_absolute", v) }
+            }
+
+            PanelSeparator {
+              foreground: root.fg
+            }
           }
 
           // Capture
@@ -810,171 +856,210 @@ PopupWindow {
           }
 
           // 2. Focus
-          PanelSectionHeader {
-            text: "FOCUS"
-            foreground: root.fg
-            fontFamily: root.fontFamily
-          }
+          Column {
+            width: parent.width
+            spacing: 10
+            visible: root.hasCtrl("focus_automatic_continuous") || root.hasCtrl("focus_absolute")
 
-          CameraToggle {
-            label: "Autofocus"
-            checked: root.getVal("focus_automatic_continuous", 1) === 1
-            onToggled: root.controlChanged("focus_automatic_continuous", root.getVal("focus_automatic_continuous", 1) === 1 ? 0 : 1)
-          }
+            PanelSectionHeader {
+              text: "FOCUS"
+              foreground: root.fg
+              fontFamily: root.fontFamily
+            }
 
-          CameraSlider {
-            objectName: "slider_focus_absolute"
-            label: "Manual Focus"
-            controlEnabled: root.getVal("focus_automatic_continuous", 1) === 0 && !root.isInactive("focus_absolute")
-            disabledHint: "Disabled while autofocus is on"
-            minimum: 0
-            maximum: 255
-            step: 1
-            value: root.getVal("focus_absolute", 0)
-            onCommitted: function(v) { root.controlChanged("focus_absolute", v) }
-          }
+            CameraToggle {
+              visible: root.hasCtrl("focus_automatic_continuous")
+              label: "Autofocus"
+              checked: root.getVal("focus_automatic_continuous", 1) === 1
+              onToggled: root.controlChanged("focus_automatic_continuous", root.getVal("focus_automatic_continuous", 1) === 1 ? 0 : 1)
+            }
 
-          PanelSeparator {
-            foreground: root.fg
+            CameraSlider {
+              objectName: "slider_focus_absolute"
+              visible: root.hasCtrl("focus_absolute")
+              label: "Manual Focus"
+              controlEnabled: root.getVal("focus_automatic_continuous", 1) === 0 && !root.isInactive("focus_absolute")
+              disabledHint: "Disabled while autofocus is on"
+              minimum: root.getMeta("focus_absolute", "min", 0)
+              maximum: root.getMeta("focus_absolute", "max", 255)
+              step: root.getMeta("focus_absolute", "step", 1)
+              value: root.getVal("focus_absolute", 0)
+              onCommitted: function(v) { root.controlChanged("focus_absolute", v) }
+            }
+
+            PanelSeparator {
+              foreground: root.fg
+            }
           }
 
           // 3. Exposure
-          PanelSectionHeader {
-            text: "EXPOSURE"
-            foreground: root.fg
-            fontFamily: root.fontFamily
-          }
+          Column {
+            width: parent.width
+            spacing: 10
+            visible: root.hasCtrl("auto_exposure") || root.hasCtrl("exposure_time_absolute") || root.hasCtrl("exposure_dynamic_framerate") || root.hasCtrl("gain")
 
-          CameraToggle {
-            label: "Auto Exposure"
-            checked: root.getVal("auto_exposure", 3) === 3
-            onToggled: root.controlChanged("auto_exposure", root.getVal("auto_exposure", 3) === 3 ? 1 : 3)
-          }
+            PanelSectionHeader {
+              text: "EXPOSURE"
+              foreground: root.fg
+              fontFamily: root.fontFamily
+            }
 
-          CameraSlider {
-            objectName: "slider_exposure_time_absolute"
-            label: "Exposure Time"
-            controlEnabled: root.getVal("auto_exposure", 3) === 1 && !root.isInactive("exposure_time_absolute")
-            disabledHint: "Disabled while auto exposure is on"
-            minimum: 3
-            maximum: 2047
-            step: 1
-            value: root.getVal("exposure_time_absolute", 156)
-            onCommitted: function(v) { root.controlChanged("exposure_time_absolute", v) }
-          }
+            CameraToggle {
+              visible: root.hasCtrl("auto_exposure")
+              label: "Auto Exposure"
+              checked: root.getVal("auto_exposure", root.exposureModes().auto) === root.exposureModes().auto
+              onToggled: {
+                var ae = root.exposureModes()
+                root.controlChanged("auto_exposure", root.getVal("auto_exposure", ae.auto) === ae.auto ? ae.manual : ae.auto)
+              }
+            }
 
-          CameraToggle {
-            label: "Low-light Compensation (Dynamic Framerate)"
-            checked: root.getVal("exposure_dynamic_framerate", 0) === 1
-            onToggled: root.controlChanged("exposure_dynamic_framerate", root.getVal("exposure_dynamic_framerate", 0) === 1 ? 0 : 1)
-          }
+            CameraSlider {
+              objectName: "slider_exposure_time_absolute"
+              visible: root.hasCtrl("exposure_time_absolute")
+              label: "Exposure Time"
+              controlEnabled: root.getVal("auto_exposure", root.exposureModes().auto) === root.exposureModes().manual && !root.isInactive("exposure_time_absolute")
+              disabledHint: "Disabled while auto exposure is on"
+              minimum: root.getMeta("exposure_time_absolute", "min", 3)
+              maximum: root.getMeta("exposure_time_absolute", "max", 2047)
+              step: root.getMeta("exposure_time_absolute", "step", 1)
+              value: root.getVal("exposure_time_absolute", 156)
+              onCommitted: function(v) { root.controlChanged("exposure_time_absolute", v) }
+            }
 
-          CameraSlider {
-            objectName: "slider_gain"
-            label: "Sensor Gain"
-            minimum: 0
-            maximum: 255
-            step: 1
-            value: root.getVal("gain", 0)
-            onCommitted: function(v) { root.controlChanged("gain", v) }
-          }
+            CameraToggle {
+              visible: root.hasCtrl("exposure_dynamic_framerate")
+              label: "Low-light Compensation (Dynamic Framerate)"
+              checked: root.getVal("exposure_dynamic_framerate", 0) === 1
+              onToggled: root.controlChanged("exposure_dynamic_framerate", root.getVal("exposure_dynamic_framerate", 0) === 1 ? 0 : 1)
+            }
 
-          PanelSeparator {
-            foreground: root.fg
+            CameraSlider {
+              objectName: "slider_gain"
+              visible: root.hasCtrl("gain")
+              label: "Sensor Gain"
+              minimum: root.getMeta("gain", "min", 0)
+              maximum: root.getMeta("gain", "max", 255)
+              step: root.getMeta("gain", "step", 1)
+              value: root.getVal("gain", 0)
+              onCommitted: function(v) { root.controlChanged("gain", v) }
+            }
+
+            PanelSeparator {
+              foreground: root.fg
+            }
           }
 
           // 4. Color & Image
-          PanelSectionHeader {
-            text: "COLOR & IMAGE"
-            foreground: root.fg
-            fontFamily: root.fontFamily
-          }
+          Column {
+            width: parent.width
+            spacing: 10
+            visible: root.hasCtrl("white_balance_automatic") || root.hasCtrl("white_balance_temperature") || root.hasCtrl("brightness") || root.hasCtrl("contrast") || root.hasCtrl("saturation") || root.hasCtrl("sharpness")
 
-          CameraToggle {
-            label: "Auto White Balance"
-            checked: root.getVal("white_balance_automatic", 1) === 1
-            onToggled: root.controlChanged("white_balance_automatic", root.getVal("white_balance_automatic", 1) === 1 ? 0 : 1)
-          }
+            PanelSectionHeader {
+              text: "COLOR & IMAGE"
+              foreground: root.fg
+              fontFamily: root.fontFamily
+            }
 
-          CameraSlider {
-            objectName: "slider_white_balance_temperature"
-            label: "Color Temperature"
-            unit: "K"
-            controlEnabled: root.getVal("white_balance_automatic", 1) === 0 && !root.isInactive("white_balance_temperature")
-            disabledHint: "Disabled while auto white balance is on"
-            minimum: 2800
-            maximum: 7500
-            step: 50
-            value: root.getVal("white_balance_temperature", 5000)
-            onCommitted: function(v) { root.controlChanged("white_balance_temperature", v) }
-          }
+            CameraToggle {
+              visible: root.hasCtrl("white_balance_automatic")
+              label: "Auto White Balance"
+              checked: root.getVal("white_balance_automatic", 1) === 1
+              onToggled: root.controlChanged("white_balance_automatic", root.getVal("white_balance_automatic", 1) === 1 ? 0 : 1)
+            }
 
-          CameraSlider {
-            objectName: "slider_brightness"
-            label: "Brightness"
-            minimum: 0
-            maximum: 255
-            step: 1
-            value: root.getVal("brightness", 128)
-            onCommitted: function(v) { root.controlChanged("brightness", v) }
-          }
+            CameraSlider {
+              objectName: "slider_white_balance_temperature"
+              visible: root.hasCtrl("white_balance_temperature")
+              label: "Color Temperature"
+              unit: "K"
+              controlEnabled: root.getVal("white_balance_automatic", 1) === 0 && !root.isInactive("white_balance_temperature")
+              disabledHint: "Disabled while auto white balance is on"
+              minimum: root.getMeta("white_balance_temperature", "min", 2800)
+              maximum: root.getMeta("white_balance_temperature", "max", 7500)
+              step: root.getMeta("white_balance_temperature", "step", 1)
+              value: root.getVal("white_balance_temperature", 5000)
+              onCommitted: function(v) { root.controlChanged("white_balance_temperature", v) }
+            }
 
-          CameraSlider {
-            objectName: "slider_contrast"
-            label: "Contrast"
-            minimum: 0
-            maximum: 255
-            step: 1
-            value: root.getVal("contrast", 128)
-            onCommitted: function(v) { root.controlChanged("contrast", v) }
-          }
+            CameraSlider {
+              objectName: "slider_brightness"
+              visible: root.hasCtrl("brightness")
+              label: "Brightness"
+              minimum: root.getMeta("brightness", "min", 0)
+              maximum: root.getMeta("brightness", "max", 255)
+              step: root.getMeta("brightness", "step", 1)
+              value: root.getVal("brightness", 128)
+              onCommitted: function(v) { root.controlChanged("brightness", v) }
+            }
 
-          CameraSlider {
-            objectName: "slider_saturation"
-            label: "Saturation"
-            minimum: 0
-            maximum: 255
-            step: 1
-            value: root.getVal("saturation", 128)
-            onCommitted: function(v) { root.controlChanged("saturation", v) }
-          }
+            CameraSlider {
+              objectName: "slider_contrast"
+              visible: root.hasCtrl("contrast")
+              label: "Contrast"
+              minimum: root.getMeta("contrast", "min", 0)
+              maximum: root.getMeta("contrast", "max", 255)
+              step: root.getMeta("contrast", "step", 1)
+              value: root.getVal("contrast", 128)
+              onCommitted: function(v) { root.controlChanged("contrast", v) }
+            }
 
-          CameraSlider {
-            objectName: "slider_sharpness"
-            label: "Sharpness"
-            minimum: 0
-            maximum: 255
-            step: 1
-            value: root.getVal("sharpness", 128)
-            onCommitted: function(v) { root.controlChanged("sharpness", v) }
-          }
+            CameraSlider {
+              objectName: "slider_saturation"
+              visible: root.hasCtrl("saturation")
+              label: "Saturation"
+              minimum: root.getMeta("saturation", "min", 0)
+              maximum: root.getMeta("saturation", "max", 255)
+              step: root.getMeta("saturation", "step", 1)
+              value: root.getVal("saturation", 128)
+              onCommitted: function(v) { root.controlChanged("saturation", v) }
+            }
 
-          PanelSeparator {
-            foreground: root.fg
+            CameraSlider {
+              objectName: "slider_sharpness"
+              visible: root.hasCtrl("sharpness")
+              label: "Sharpness"
+              minimum: root.getMeta("sharpness", "min", 0)
+              maximum: root.getMeta("sharpness", "max", 255)
+              step: root.getMeta("sharpness", "step", 1)
+              value: root.getVal("sharpness", 128)
+              onCommitted: function(v) { root.controlChanged("sharpness", v) }
+            }
+
+            PanelSeparator {
+              foreground: root.fg
+            }
           }
 
           // 5. Utilities
-          PanelSectionHeader {
-            text: "UTILITIES"
-            foreground: root.fg
-            fontFamily: root.fontFamily
-          }
+          Column {
+            width: parent.width
+            spacing: 10
+            visible: root.hasCtrl("power_line_frequency") || root.hasCtrl("backlight_compensation")
 
-          CameraSegmented {
-            label: "Anti-Flicker (Power Line Frequency)"
-            options: [
-              { value: "0", label: "Off" },
-              { value: "1", label: "50 Hz" },
-              { value: "2", label: "60 Hz" }
-            ]
-            value: String(root.getVal("power_line_frequency", 2))
-            onChanged: function(v) { root.controlChanged("power_line_frequency", parseInt(v, 10)) }
-          }
+            PanelSectionHeader {
+              text: "UTILITIES"
+              foreground: root.fg
+              fontFamily: root.fontFamily
+            }
 
-          CameraToggle {
-            label: "Backlight Compensation"
-            checked: root.getVal("backlight_compensation", 1) === 1
-            onToggled: root.controlChanged("backlight_compensation", root.getVal("backlight_compensation", 1) === 1 ? 0 : 1)
+            CameraSegmented {
+              visible: root.hasCtrl("power_line_frequency")
+              label: "Anti-Flicker (Power Line Frequency)"
+              options: (typeof Model !== "undefined" && typeof Model.powerLineOptions === "function")
+                ? Model.powerLineOptions(root.controls.power_line_frequency && root.controls.power_line_frequency.menuItems)
+                : []
+              value: String(root.getVal("power_line_frequency", 2))
+              onChanged: function(v) { root.controlChanged("power_line_frequency", parseInt(v, 10)) }
+            }
+
+            CameraToggle {
+              visible: root.hasCtrl("backlight_compensation")
+              label: "Backlight Compensation"
+              checked: root.getVal("backlight_compensation", 1) === 1
+              onToggled: root.controlChanged("backlight_compensation", root.getVal("backlight_compensation", 1) === 1 ? 0 : 1)
+            }
           }
 
           Item {

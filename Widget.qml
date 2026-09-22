@@ -19,7 +19,8 @@ Item {
     ? (luminance(bar.background) > 0.6 ? "#1a1a1a" : bar.foreground)
     : "white"
 
-  property string device: (typeof Model !== "undefined" && Model.DEFAULT_DEVICE) ? Model.DEFAULT_DEVICE : "/dev/video0"
+  property string device: ""
+  property var discoveredDevices: []
   property bool devicePresent: false
   property bool permissionDenied: false
   property bool hasCameractrls: false
@@ -35,7 +36,7 @@ Item {
   property bool captureBusy: false
   property int pendingCaptureCount: 0
   readonly property bool previewPaused: pendingCaptureCount > 0
-  property string modelName: "Logitech MX Brio"
+  property string modelName: "No camera connected"
   property var commandQueue: []
   property bool isDragging: false
   property bool previewWasActiveDuringSession: false
@@ -194,42 +195,46 @@ Item {
   }
 
   function resetDefaults() {
+    if (!root.device) return
     root.listGeneration++
+    var copy = Object.assign({}, root.controls)
+    if (root.fovAvailable && typeof Model !== "undefined" && Model.CONTROLS && Model.CONTROLS.logitech_brio_fov) {
+      var fovDef = Model.CONTROLS.logitech_brio_fov.defaultVal
+      copy.logitech_brio_fov = {
+        name: "logitech_brio_fov",
+        backend: "cameractrls",
+        defaultVal: fovDef,
+        default: fovDef
+      }
+    }
     var cmds = (typeof Model !== "undefined" && typeof Model.buildResetCommands === "function")
-      ? Model.buildResetCommands(root.device)
+      ? Model.buildResetCommands(root.device, copy)
       : []
     for (var i = 0; i < cmds.length; i++) {
       var cmd = cmds[i]
-      if (cmd && cmd[0] === "cameractrls" && !root.fovAvailable) {
-        if (root.hasCameractrls && cameractrlsListProc.running) {
-          root.pendingFov = 65
-        }
-        continue
-      }
+      if (cmd && cmd[0] === "cameractrls" && !root.fovAvailable) continue
       queueCommand(cmd)
     }
-    if (typeof Model !== "undefined" && typeof Model.getDefaults === "function") {
-      var defs = Model.getDefaults()
-      var updated = Object.assign({}, root.controls)
-      for (var k in defs) {
-        if (k === "logitech_brio_fov") {
-          if (root.fovAvailable) {
-            root.fovControl = { logitech_brio_fov: defs[k] }
-          } else if (root.hasCameractrls && cameractrlsListProc.running) {
-            root.pendingFov = defs[k]
-          }
-        } else {
-          if (!updated[k]) updated[k] = { name: k }
-          updated[k] = Object.assign({}, updated[k], { value: defs[k] })
-        }
+    var updated = Object.assign({}, root.controls)
+    for (var k in copy) {
+      var entry = copy[k]
+      if (!entry) continue
+      var def = entry.defaultVal !== undefined ? entry.defaultVal : entry.default
+      if (def === undefined) continue
+      if (k === "logitech_brio_fov") {
+        if (root.fovAvailable) root.fovControl = { logitech_brio_fov: def }
+        continue
       }
-      root.controls = updated
+      if (!updated[k]) updated[k] = { name: k }
+      updated[k] = Object.assign({}, updated[k], { value: def })
     }
+    root.controls = updated
   }
 
   function refresh() {
-    if (!checkDeviceProc.running) checkDeviceProc.running = true
+    if (!v4l2DevicesProc.running) v4l2DevicesProc.running = true
     if (!detectCameractrlsProc.running) detectCameractrlsProc.running = true
+    if (root.device !== "") root.startDeviceCheck()
   }
 
   function readControls() {
@@ -243,12 +248,100 @@ Item {
 
     if (!v4l2ListProc.running) {
       v4l2ListProc.queryGeneration = root.listGeneration
+      v4l2ListProc.queryDevice = root.device
       v4l2ListProc.running = true
     }
     if (popup.open && root.fovAvailable && !cameractrlsListProc.running) {
       cameractrlsListProc.queryGeneration = root.listGeneration
       cameractrlsListProc.running = true
     }
+  }
+
+  function applyDevices(list) {
+    var devices = list || []
+    root.discoveredDevices = devices
+    var selected = null
+    if (typeof Model !== "undefined" && typeof Model.selectActiveDevice === "function") {
+      selected = Model.selectActiveDevice(devices, root.device)
+    }
+    if (!selected) {
+      root.listGeneration++
+      root.device = ""
+      root.modelName = "No camera connected"
+      root.devicePresent = false
+      root.permissionDenied = false
+      root.controls = ({})
+      root.fovControl = ({})
+      root.fovAvailable = false
+      root.pendingFov = null
+      root.captureMode = ({})
+      root.captureFormats = []
+      root.captureFormatsQueried = false
+      root.captureBusy = false
+      root.pendingCaptureCount = 0
+      root.commandQueue = []
+      return
+    }
+    if (selected.path === root.device) {
+      root.modelName = selected.card || selected.name || root.modelName
+      root.readControls()
+      return
+    }
+    root.switchTo(selected)
+  }
+
+  function switchTo(deviceObj) {
+    if (!deviceObj || !deviceObj.path) return
+    root.listGeneration++
+    root.commandQueue = []
+    root.device = deviceObj.path
+    root.modelName = deviceObj.card || deviceObj.name || "No camera connected"
+    root.permissionDenied = false
+    root.devicePresent = false
+    root.controls = ({})
+    root.fovControl = ({})
+    root.fovAvailable = false
+    root.pendingFov = null
+    root.captureMode = ({})
+    root.captureFormats = []
+    root.captureFormatsQueried = false
+    root.captureBusy = false
+    root.pendingCaptureCount = 0
+    root.startDeviceCheck()
+  }
+
+  function startDeviceCheck() {
+    if (root.device === "") return
+    if (checkDeviceProc.running) return
+    checkDeviceProc.queryDevice = root.device
+    checkDeviceProc.running = true
+  }
+
+  function getDevice() {
+    return root.device
+  }
+
+  function setDevice(path) {
+    if (!path || path === root.device) return
+    var list = root.discoveredDevices || []
+    for (var i = 0; i < list.length; i++) {
+      var d = list[i]
+      if (d && d.path === path) {
+        root.switchTo(d)
+        return
+      }
+    }
+  }
+
+  function listDevices() {
+    var list = root.discoveredDevices || []
+    var out = []
+    for (var i = 0; i < list.length; i++) {
+      var d = list[i]
+      if (!d) continue
+      out.push({ path: d.path, name: d.name || d.card || "" })
+    }
+    return JSON.stringify(out)
   }
 
   IpcHandler {
@@ -262,17 +355,52 @@ Item {
     function setCtrl(name: string, value: string) { root.setCtrl(name, value) }
     function getCaptureMode(): string { return root.getCaptureMode() }
     function setCaptureMode(resolution: string, fps: string) { root.setCaptureModeFromIpc(resolution, fps) }
+    function getDevice(): string { return root.getDevice() }
+    function setDevice(path: string) { root.setDevice(path) }
+    function listDevices(): string { return root.listDevices() }
+  }
+
+  Process {
+    id: v4l2DevicesProc
+    property string stdoutText: ""
+    command: (typeof Model !== "undefined" && typeof Model.buildV4l2DevicesCommand === "function")
+      ? Model.buildV4l2DevicesCommand()
+      : ["sh", "-c", "exit 1"]
+    stdout: StdioCollector {
+      id: v4l2DevicesOut
+      waitForEnd: true
+      onStreamFinished: v4l2DevicesProc.stdoutText = text
+    }
+    onExited: function(exitCode) {
+      var raw = v4l2DevicesProc.stdoutText || v4l2DevicesOut.text || ""
+      v4l2DevicesProc.stdoutText = ""
+      if (exitCode !== 0 && raw === "") {
+        root.applyDevices([])
+        return
+      }
+      var list = []
+      if (typeof Model !== "undefined" && typeof Model.parseV4l2Devices === "function") {
+        list = Model.parseV4l2Devices(raw)
+      }
+      root.applyDevices(list || [])
+    }
   }
 
   Process {
     id: checkDeviceProc
+    property string queryDevice: ""
     command: ["sh", "-c", "test -e \"$1\" || exit 2; test -r \"$1\" && test -w \"$1\" || exit 3; exit 0", "--", root.device]
     onExited: function(exitCode) {
+      if (checkDeviceProc.queryDevice !== root.device) {
+        root.startDeviceCheck()
+        return
+      }
       root.devicePresent = (exitCode === 0 || exitCode === 3)
       root.permissionDenied = (exitCode === 3)
       if (root.devicePresent && !root.permissionDenied) {
         if (!root.captureFormatsQueried && !v4l2FormatsProc.running) {
           root.captureFormatsQueried = true
+          v4l2FormatsProc.queryDevice = root.device
           v4l2FormatsProc.running = true
         }
         if (root.hasCameractrls && !root.fovAvailable && !cameractrlsListProc.running) {
@@ -313,12 +441,22 @@ Item {
 
   Process {
     id: v4l2FormatsProc
+    property string queryDevice: ""
     command: (typeof Model !== "undefined" && typeof Model.buildV4l2ListFormatsCommand === "function")
       ? Model.buildV4l2ListFormatsCommand(root.device)
       : ["v4l2-ctl", "-d", root.device, "--list-formats-ext"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (v4l2FormatsProc.queryDevice !== root.device) {
+          root.captureFormatsQueried = false
+          if (root.device !== "" && root.devicePresent && !root.permissionDenied && !v4l2FormatsProc.running) {
+            root.captureFormatsQueried = true
+            v4l2FormatsProc.queryDevice = root.device
+            v4l2FormatsProc.running = true
+          }
+          return
+        }
         if (text && typeof Model !== "undefined" && typeof Model.parseV4l2Formats === "function") {
           var fmts = Model.parseV4l2Formats(text)
           if (fmts && fmts.length > 0) {
@@ -332,6 +470,7 @@ Item {
   Process {
     id: v4l2ListProc
     property int queryGeneration: 0
+    property string queryDevice: ""
     command: (typeof Model !== "undefined" && typeof Model.buildV4l2ListCommand === "function")
       ? Model.buildV4l2ListCommand(root.device)
       : ["v4l2-ctl", "-d", root.device, "--get-fmt-video", "--get-parm", "--list-ctrls-menus"]
@@ -339,6 +478,9 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         if (v4l2ListProc.queryGeneration !== root.listGeneration) {
+          return
+        }
+        if (v4l2ListProc.queryDevice !== root.device) {
           return
         }
         if (text && typeof Model !== "undefined" && typeof Model.parseV4l2Ctrls === "function") {
@@ -359,7 +501,8 @@ Item {
       }
     }
     onExited: function(exitCode) {
-      if (exitCode !== 0) root.devicePresent = false
+      var sameRead = v4l2ListProc.queryDevice === root.device && v4l2ListProc.queryGeneration === root.listGeneration
+      if (sameRead && exitCode !== 0) root.devicePresent = false
       if (root.refreshPending && !cameractrlsListProc.running) {
         root.refreshPending = false
         root.readControls()
@@ -390,15 +533,17 @@ Item {
       }
     }
     onExited: function(exitCode) {
-      if (exitCode !== 0 || !cameractrlsListProc.foundFov) {
-        root.fovAvailable = false
-        root.pendingFov = null
-      } else {
-        root.fovAvailable = true
-        if (root.pendingFov !== null) {
-          var val = root.pendingFov
+      if (cameractrlsListProc.queryGeneration === root.listGeneration) {
+        if (exitCode !== 0 || !cameractrlsListProc.foundFov) {
+          root.fovAvailable = false
           root.pendingFov = null
-          root.setControl("logitech_brio_fov", val)
+        } else {
+          root.fovAvailable = true
+          if (root.pendingFov !== null) {
+            var val = root.pendingFov
+            root.pendingFov = null
+            root.setControl("logitech_brio_fov", val)
+          }
         }
       }
       if (root.refreshPending && !v4l2ListProc.running) {
@@ -489,6 +634,8 @@ Item {
     previewPaused: root.previewPaused
     modelName: root.modelName
     devicePath: root.device
+    discoveredDevices: root.discoveredDevices
+    onDeviceChangeRequested: function(path) { root.setDevice(path) }
     onOpenChanged: {
       if (!popup.open) {
         root.captureBusy = false
