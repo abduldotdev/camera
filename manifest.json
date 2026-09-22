@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "abduldotdev.camera",
   "name": "Camera",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "abduldotdev",
   "license": "MIT",
   "description": "Logi Tune-like controls for the Logitech MX Brio 4K webcam",

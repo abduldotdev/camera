@@ -11,8 +11,6 @@
 
 var DEFAULT_DEVICE = "/dev/video0"
 
-var ZOOM_WHEEL_MULTIPLIER = 10
-
 var PREVIEW_STATES = [
   "active",
   "inactive",
@@ -818,22 +816,6 @@ function isControlActive(controlName, currentValues) {
   return depVal == ctrl.activeWhen
 }
 
-// Step helper for mouse-wheel increments with clamping.
-function wheelStep(value, angleDeltaY, step, multiplier, min, max) {
-  var val = (value !== undefined && value !== null) ? Number(value) : 0
-  var s = (step !== undefined && step !== null) ? Number(step) : 1
-  var m = (multiplier !== undefined && multiplier !== null) ? Number(multiplier) : 1
-  var dir = angleDeltaY > 0 ? 1 : (angleDeltaY < 0 ? -1 : 0)
-  var next = val + (dir * s * m)
-  if (min !== undefined && min !== null) {
-    next = Math.max(Number(min), next)
-  }
-  if (max !== undefined && max !== null) {
-    next = Math.min(Number(max), next)
-  }
-  return next
-}
-
 function _getFmtWidth(f) {
   if (!f) return 0
   if (typeof f.width === "number") return f.width
@@ -920,7 +902,6 @@ if (typeof module !== "undefined") {
   module.exports = {
     DEFAULT_DEVICE: DEFAULT_DEVICE,
     CONTROLS: CONTROLS,
-    ZOOM_WHEEL_MULTIPLIER: ZOOM_WHEEL_MULTIPLIER,
     PREVIEW_STATES: PREVIEW_STATES,
     PIXEL_FORMAT: PIXEL_FORMAT,
     PIXEL_FORMATS: PIXEL_FORMAT,
@@ -944,7 +925,6 @@ if (typeof module !== "undefined") {
     resolutionOptions: resolutionOptions,
     fpsOptions: fpsOptions,
     pickCaptureMode: pickCaptureMode,
-    wheelStep: wheelStep,
     pickCameraFormat: pickCameraFormat
   }
 }
