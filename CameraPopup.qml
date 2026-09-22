@@ -34,7 +34,7 @@ PopupWindow {
   function pickCameraDevice() {
     var inputs = mediaDevices.videoInputs
     for (var i = 0; i < inputs.length; i++) {
-      if (inputs[i].id === root.devicePath) return inputs[i]
+      if (String(inputs[i].id) === root.devicePath) return inputs[i]
     }
     return null
   }
