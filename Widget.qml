@@ -45,6 +45,7 @@ Item {
     root.captureBusy = false
   }
   function open() {
+    root.previewWasActiveDuringSession = false
     popup.open = true
     refresh()
   }
@@ -92,8 +93,8 @@ Item {
     var picked = Model.pickCaptureMode(root.captureFormats, root.captureMode, width, height, fps)
     if (!picked) return
     root.listGeneration++
-    root.captureMode = picked
     root.pendingCaptureCount++
+    root.captureMode = picked
     var cmd = (typeof Model.buildV4l2SetCaptureModeCommand === "function")
       ? Model.buildV4l2SetCaptureModeCommand(root.device, picked)
       : ["v4l2-ctl", "-d", root.device, "--set-fmt-video=width=" + picked.width + ",height=" + picked.height + ",pixelformat=" + picked.pixelformat, "--set-parm=" + picked.fps]
@@ -350,7 +351,7 @@ Item {
         if (text && typeof Model !== "undefined" && typeof Model.parseV4l2CaptureMode === "function") {
           var parsedMode = Model.parseV4l2CaptureMode(text)
           if (parsedMode && parsedMode.width !== undefined) {
-            if (!popup.cameraActive) {
+            if (!popup.cameraActive || root.captureMode.width === undefined) {
               root.captureMode = parsedMode
             }
           }
@@ -489,9 +490,7 @@ Item {
     modelName: root.modelName
     devicePath: root.device
     onOpenChanged: {
-      if (popup.open) {
-        root.previewWasActiveDuringSession = false
-      } else {
+      if (!popup.open) {
         root.captureBusy = false
         if (root.previewWasActiveDuringSession) {
           root.previewWasActiveDuringSession = false

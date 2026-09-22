@@ -47,16 +47,23 @@ PopupWindow {
         property alias camera: cam
         property alias captureSession: cs
 
+        readonly property var matchedFormat: {
+          var dev = root.pickCameraDevice()
+          if (!dev || !dev.videoFormats) return null
+          return Model.pickCameraFormat(dev.videoFormats, root.captureMode)
+        }
+
         Camera {
           id: cam
           cameraDevice: root.pickCameraDevice()
-          cameraFormat: {
-            var dev = root.pickCameraDevice()
-            if (!dev || !dev.videoFormats) return undefined
-            var fmt = Model.pickCameraFormat(dev.videoFormats, root.captureMode)
-            return fmt !== null ? fmt : undefined
-          }
           active: true
+        }
+
+        Binding {
+          target: cam
+          property: "cameraFormat"
+          when: matchedFormat !== null
+          value: matchedFormat
         }
 
         CaptureSession {
